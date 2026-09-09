@@ -33,6 +33,9 @@ type DecompileJob = {
 const MAX_TREE_NODES = 30_000;
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 const PROGRESS_TAIL_LINES = 40;
+// 全文搜索：每文件最多采样 2MB、结果最多 500 条，防大产物卡死
+const SEARCH_MAX_FILE_BYTES = 2 * 1024 * 1024;
+const SEARCH_MAX_RESULTS = 500;
 
 // jadx exit 3 = 完成但有部分类反编译失败，结果仍可用
 const JADX_PARTIAL_FAILURE_CODE = 3;
@@ -45,6 +48,59 @@ const TEXT_EXTENSIONS = new Set([
 
 export function isPreviewableExtension(name: string): boolean {
   return TEXT_EXTENSIONS.has(path.extname(name).toLowerCase());
+}
+
+export interface DecompileSearchHit {
+  relPath: string;
+  /** 首个命中位置前的上下文片段（含命中词） */
+  context: string;
+}
+
+/** 全文搜索：文件名或内容包含 query（大小写不敏感）。纯函数便于单测。 */
+export function searchDecompileOutput(
+  outputDir: string,
+  query: string,
+  maxResults = SEARCH_MAX_RESULTS
+): { hits: DecompileSearchHit[]; truncated: boolean } {
+  const { nodes } = buildDecompileTree(outputDir);
+  const needle = query.toLowerCase();
+  const hits: DecompileSearchHit[] = [];
+  let truncated = false;
+
+  for (const node of nodes) {
+    if (node.type !== "file") continue;
+    if (hits.length >= maxResults) {
+      truncated = true;
+      break;
+    }
+    if (node.relPath.toLowerCase().includes(needle)) {
+      hits.push({ relPath: node.relPath, context: "" });
+      continue;
+    }
+    if (!isPreviewableExtension(node.name) || node.size > SEARCH_MAX_FILE_BYTES) {
+      continue;
+    }
+    let content: string;
+    try {
+      content = readFileSync(path.join(outputDir, node.relPath), "utf8");
+    } catch {
+      continue;
+    }
+    const lower = content.toLowerCase();
+    const at = lower.indexOf(needle);
+    if (at < 0) continue;
+    const start = Math.max(0, at - 60);
+    const end = Math.min(content.length, at + needle.length + 80);
+    hits.push({
+      relPath: node.relPath,
+      context: content
+        .slice(start, end)
+        .replace(/\s+/g, " ")
+        .trim()
+    });
+  }
+
+  return { hits, truncated };
 }
 
 /** 把相对路径安全解析到 job 根目录内；越界（绝对路径/..穿越）返回 null。 */
@@ -296,6 +352,21 @@ export class DecompileManager {
       ok: true,
       content: content.charCodeAt(0) === 0xfeff ? content.slice(1) : content
     };
+  }
+
+  search(
+    jobId: string,
+    query: string
+  ): { hits: DecompileSearchHit[]; truncated: boolean; message?: string } {
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      return { hits: [], truncated: false, message: "反编译任务不存在或已被清理" };
+    }
+    const trimmed = query.trim();
+    if (!trimmed || trimmed.length > 200) {
+      return { hits: [], truncated: false };
+    }
+    return searchDecompileOutput(job.outputDir, trimmed);
   }
 
   cleanup(): void {

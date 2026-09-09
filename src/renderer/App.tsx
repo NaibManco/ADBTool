@@ -638,6 +638,7 @@ export function App() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [railWidth, setRailWidth] = useState(340);
   const [draggingApk, setDraggingApk] = useState(false);
+  const [copiedError, setCopiedError] = useState(false);
   const { theme, changeTheme } = useTheme();
 
   const refresh = useCallback(async (showLoading = false) => {
@@ -677,7 +678,7 @@ export function App() {
             )
           )
       );
-      setError(undefined);
+      // 错误提示只允许手动关闭，轮询成功不再自动清除
     } catch (refreshError) {
       setError(
         refreshError instanceof Error ? refreshError.message : String(refreshError)
@@ -719,6 +720,25 @@ export function App() {
     const timer = window.setInterval(() => setRecordingNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [recordingSerials.size]);
+
+  // 录屏意外结束（设备断开/画面旋转）：同步清理本地状态并提示
+  useEffect(() => {
+    return window.androidTool.onRecordingEnded((event) => {
+      setRecordingSerials((current) => {
+        if (!current.has(event.serial)) return current;
+        const next = new Set(current);
+        next.delete(event.serial);
+        return next;
+      });
+      setRecordingStarts((current) => {
+        if (!current.has(event.serial)) return current;
+        const next = new Map(current);
+        next.delete(event.serial);
+        return next;
+      });
+      setError(event.ok ? event.message : `录屏异常结束：${event.message}`);
+    });
+  }, []);
 
   useEffect(() => {
     if (!mirrorDevices.some((device) => device.serial === activeMirrorSerial)) {
@@ -875,7 +895,6 @@ export function App() {
       } else if (!result.media) {
         setError("截图完成，但未返回可预览的图片");
       } else {
-        setError(undefined);
         setCapturePreview(result.media);
       }
     } finally {
@@ -887,32 +906,43 @@ export function App() {
     const recording = recordingSerials.has(device.serial);
     setBusySerial(device.serial);
     try {
-      const result = recording
-        ? await window.androidTool.stopScreenRecording(device.serial)
-        : await window.androidTool.startScreenRecording(device.serial);
+      if (recording) {
+        // 停止路径：主进程无论成败都会结束会话，本地状态同步清掉，
+        // 避免停止失败时永远停在"录制中"
+        const result = await window.androidTool.stopScreenRecording(device.serial);
+        setRecordingSerials((current) => {
+          const next = new Set(current);
+          next.delete(device.serial);
+          return next;
+        });
+        setRecordingStarts((current) => {
+          const next = new Map(current);
+          next.delete(device.serial);
+          return next;
+        });
+        if (!result.ok) {
+          setError(result.message || "录屏停止失败");
+          return;
+        }
+        if (result.cancelled) return;
+        if (!result.media) {
+          setError("录屏完成，但未返回可预览的视频");
+          return;
+        }
+        setCapturePreview(result.media);
+        return;
+      }
+
+      const result = await window.androidTool.startScreenRecording(device.serial);
       if (!result.ok) {
-        setError(result.message || "录屏操作失败");
+        setError(result.message || "录屏启动失败");
         return;
       }
       if (result.cancelled) return;
-      if (recording && !result.media) {
-        setError("录屏完成，但未返回可预览的视频");
-        return;
-      }
-      setError(undefined);
-      if (result.media) setCapturePreview(result.media);
-      setRecordingSerials((current) => {
-        const next = new Set(current);
-        if (recording) next.delete(device.serial);
-        else next.add(device.serial);
-        return next;
-      });
-      setRecordingStarts((current) => {
-        const next = new Map(current);
-        if (recording) next.delete(device.serial);
-        else next.set(device.serial, result.startedAt ?? Date.now());
-        return next;
-      });
+      setRecordingSerials((current) => new Set(current).add(device.serial));
+      setRecordingStarts((current) =>
+        new Map(current).set(device.serial, result.startedAt ?? Date.now())
+      );
     } finally {
       setBusySerial(undefined);
     }
@@ -975,7 +1005,6 @@ export function App() {
     try {
       setDroppedApk(fileFromDrop(file));
       setApkOpen(true);
-      setError(undefined);
     } catch (dropError) {
       setError(dropError instanceof Error ? dropError.message : String(dropError));
     }
@@ -1078,7 +1107,30 @@ export function App() {
         <div className="error-banner workbench-error">
           <strong>操作未完成</strong>
           <span>{error}</span>
-          <button onClick={() => setError(undefined)}>×</button>
+          <button
+            className="error-copy"
+            onClick={() => {
+              void window.androidTool
+                .copyLogcatText(error)
+                .then((result) => {
+                  setCopiedError(result.ok);
+                  window.setTimeout(
+                    () => setCopiedError(false),
+                    1_500
+                  );
+                });
+            }}
+            title="复制完整错误信息"
+          >
+            {copiedError ? "已复制" : "复制"}
+          </button>
+          <button
+            className="error-close"
+            onClick={() => setError(undefined)}
+            title="关闭"
+          >
+            ×
+          </button>
         </div>
       )}
 

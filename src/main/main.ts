@@ -5,7 +5,7 @@ import {
   rmSync,
   statSync
 } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import {
   app,
@@ -56,6 +56,7 @@ import {
 import { detectImageMime, DeviceFileManager } from "./device-files";
 import { findGeneratedBugreport } from "./bugreport-files";
 import { DeviceInfoCollector } from "./device-info";
+import { ScreenRecorder } from "./screen-recorder";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -119,6 +120,30 @@ const decompile = new DecompileManager(
       }
     }
   }
+);
+// 录屏：scrcpy-server 隐藏会话 + 电脑侧 mp4 封装（绕开设备端 screenrecord 限制）
+let scrcpyServerBytesCache: Promise<Uint8Array> | undefined;
+const readScrcpyServerBytes = (): Promise<Uint8Array> => {
+  scrcpyServerBytesCache ??= readFile(resolveScrcpyServerPath()).then(
+    (buffer) => new Uint8Array(buffer),
+    (error: unknown) => {
+      scrcpyServerBytesCache = undefined; // 读取失败清缓存，下次重试
+      throw error;
+    }
+  );
+  return scrcpyServerBytesCache;
+};
+const screenRecorder = new ScreenRecorder(
+  resolveAdbPath(),
+  () => resolveScrcpyServerPath(),
+  (result) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send("capture:recording-ended", result);
+      }
+    }
+  },
+  readScrcpyServerBytes
 );
 
 function resolveJadxJarPathSafe(): string {
@@ -227,7 +252,20 @@ function logcatExportFileName(serial: string): string {
   return `Logcat-${safeSerial}-${timestamp}.txt`;
 }
 
+/**
+ * 对话框父窗口取「发起请求的窗口」：否则在副窗口（如反编译）里选文件时，
+ * 对话框会把主窗口拉到前台盖住发起窗口。
+ */
+function dialogParent(event: Electron.IpcMainInvokeEvent): BrowserWindow | undefined {
+  const sender = BrowserWindow.fromWebContents(event.sender);
+  if (sender && !sender.isDestroyed()) {
+    return sender;
+  }
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+}
+
 async function chooseMediaSavePath(
+  event: Electron.IpcMainInvokeEvent,
   name: string,
   kind: "image" | "video"
 ): Promise<string | undefined> {
@@ -243,8 +281,9 @@ async function chooseMediaSavePath(
       extensions: [extension]
     }]
   };
-  const result = mainWindow && !mainWindow.isDestroyed()
-    ? await dialog.showSaveDialog(mainWindow, options)
+  const parent = dialogParent(event);
+  const result = parent
+    ? await dialog.showSaveDialog(parent, options)
     : await dialog.showSaveDialog(options);
   return result.canceled ? undefined : result.filePath;
 }
@@ -417,18 +456,21 @@ function registerIpc(): void {
     }));
   });
 
-  ipcMain.handle("apk:select", async (): Promise<ApkFile | undefined> => {
-    const options: Electron.OpenDialogOptions = {
-      properties: ["openFile"],
-      filters: [{ name: "Android APK", extensions: ["apk"] }]
-    };
-    const result =
-      mainWindow && !mainWindow.isDestroyed()
-        ? await dialog.showOpenDialog(mainWindow, options)
+  ipcMain.handle(
+    "apk:select",
+    async (event): Promise<ApkFile | undefined> => {
+      const options: Electron.OpenDialogOptions = {
+        properties: ["openFile"],
+        filters: [{ name: "Android APK", extensions: ["apk"] }]
+      };
+      const parent = dialogParent(event);
+      const result = parent
+        ? await dialog.showOpenDialog(parent, options)
         : await dialog.showOpenDialog(options);
-    if (result.canceled || result.filePaths.length === 0) return undefined;
-    return readApkFile(result.filePaths[0]);
-  });
+      if (result.canceled || result.filePaths.length === 0) return undefined;
+      return readApkFile(result.filePaths[0]);
+    }
+  );
 
   ipcMain.handle("apk:resolve-path", (_event, apkPath: string): ApkFile =>
     readApkFile(apkPath.trim())
@@ -462,7 +504,7 @@ function registerIpc(): void {
 
   ipcMain.handle(
     "device:bugreport",
-    async (_event, serial: string): Promise<ActionResult> => {
+    async (event, serial: string): Promise<ActionResult> => {
       try {
         assertSerial(serial);
         const options: Electron.SaveDialogOptions = {
@@ -470,8 +512,9 @@ function registerIpc(): void {
           defaultPath: path.join(app.getPath("downloads"), bugreportFileName(serial)),
           filters: [{ name: "Bugreport ZIP", extensions: ["zip"] }]
         };
-        const result = mainWindow && !mainWindow.isDestroyed()
-          ? await dialog.showSaveDialog(mainWindow, options)
+        const parent = dialogParent(event);
+        const result = parent
+          ? await dialog.showSaveDialog(parent, options)
           : await dialog.showSaveDialog(options);
         if (result.canceled || !result.filePath) {
           return { ok: true, cancelled: true };
@@ -512,12 +555,13 @@ function registerIpc(): void {
     }
   );
 
-  ipcMain.handle("files:select-upload", async (): Promise<LocalFile[]> => {
+  ipcMain.handle("files:select-upload", async (event): Promise<LocalFile[]> => {
     const options: Electron.OpenDialogOptions = {
       properties: ["openFile", "multiSelections"]
     };
-    const result = mainWindow && !mainWindow.isDestroyed()
-      ? await dialog.showOpenDialog(mainWindow, options)
+    const parent = dialogParent(event);
+    const result = parent
+      ? await dialog.showOpenDialog(parent, options)
       : await dialog.showOpenDialog(options);
     return result.canceled ? [] : result.filePaths.map(readLocalFile);
   });
@@ -548,7 +592,7 @@ function registerIpc(): void {
 
   ipcMain.handle(
     "files:download",
-    async (_event, serial: string, remotePath: string): Promise<ActionResult> => {
+    async (event, serial: string, remotePath: string): Promise<ActionResult> => {
       try {
         assertSerial(serial);
         const options: Electron.OpenDialogOptions = {
@@ -556,8 +600,9 @@ function registerIpc(): void {
           defaultPath: app.getPath("downloads"),
           properties: ["openDirectory", "createDirectory"]
         };
-        const result = mainWindow && !mainWindow.isDestroyed()
-          ? await dialog.showOpenDialog(mainWindow, options)
+        const parent = dialogParent(event);
+        const result = parent
+          ? await dialog.showOpenDialog(parent, options)
           : await dialog.showOpenDialog(options);
         if (result.canceled || result.filePaths.length === 0) {
           return { ok: true, cancelled: true };
@@ -800,10 +845,11 @@ function registerIpc(): void {
 
   ipcMain.handle(
     "capture:media-save-as",
-    async (_event, id: string): Promise<ActionResult> => {
+    async (event, id: string): Promise<ActionResult> => {
       try {
         const entry = captureMedia.get(id);
         const destination = await chooseMediaSavePath(
+          event,
           entry.descriptor.name,
           entry.descriptor.kind
         );
@@ -825,16 +871,28 @@ function registerIpc(): void {
     async (_event, serial: string): Promise<ActionResult> => {
       try {
         assertSerial(serial);
-        if (capture.isRecording(serial)) {
+        if (capture.isRecording(serial) || screenRecorder.isRecording(serial)) {
           return { ok: false, message: "该设备已经在录屏" };
         }
         const localPath = captureMedia.createVideoPath(serial);
-        const startedAt = await capture.startRecording(serial, localPath);
-        return {
-          ok: startedAt !== undefined,
-          message: startedAt ? "录屏已开始，最长 3 分钟" : "该设备已经在录屏",
-          startedAt
-        };
+        // 策略：优先 adb screenrecord（轻量）；设备封禁时自动回退 scrcpy 链路
+        try {
+          const startedAt = await capture.startRecording(serial, localPath);
+          return {
+            ok: true,
+            message: `录屏已开始，最长 ${180 / 60} 分钟`,
+            startedAt
+          };
+        } catch (adbError) {
+          const reason =
+            adbError instanceof Error ? adbError.message : String(adbError);
+          const startedAt = await screenRecorder.start(serial, localPath);
+          return {
+            ok: true,
+            message: `录屏已开始（设备限制 screenrecord，已用兼容链路；${reason}）`,
+            startedAt
+          };
+        }
       } catch (error) {
         return resultFromError(error);
       }
@@ -846,10 +904,21 @@ function registerIpc(): void {
     async (_event, serial: string): Promise<ActionResult> => {
       try {
         assertSerial(serial);
-        const startedAt = capture.recordingSessions()
-          .find((session) => session.serial === serial)?.startedAt;
-        const localPath = await capture.stopRecording(serial);
-        if (!localPath) return { ok: false, message: "该设备当前没有录屏" };
+        let localPath: string | undefined;
+        let startedAt: number | undefined;
+        if (screenRecorder.isRecording(serial)) {
+          startedAt = screenRecorder.recordingSessions()
+            .find((session) => session.serial === serial)?.startedAt;
+          const result = await screenRecorder.stop(serial);
+          localPath = result.localPath;
+        } else if (capture.isRecording(serial)) {
+          startedAt = capture.adbRecordingSessions()
+            .find((session) => session.serial === serial)?.startedAt;
+          localPath = await capture.stopRecording(serial);
+        }
+        if (!localPath) {
+          return { ok: false, message: "录屏未保存任何内容" };
+        }
         const media = captureMedia.addVideo(
           serial,
           localPath,
@@ -866,7 +935,10 @@ function registerIpc(): void {
     }
   );
 
-  ipcMain.handle("capture:recording-list", () => capture.recordingSessions());
+  ipcMain.handle("capture:recording-list", () => [
+    ...capture.adbRecordingSessions(),
+    ...screenRecorder.recordingSessions()
+  ]);
 
   ipcMain.handle("device:packages", async (_event, serial: string) => {
     assertSerial(serial);
@@ -1025,7 +1097,7 @@ function registerIpc(): void {
   ipcMain.handle(
     "logcat:export",
     async (
-      _event,
+      event,
       serial: string,
       text: string
     ): Promise<ActionResult> => {
@@ -1045,8 +1117,9 @@ function registerIpc(): void {
           ),
           filters: [{ name: "文本文件", extensions: ["txt"] }]
         };
-        const result = mainWindow && !mainWindow.isDestroyed()
-          ? await dialog.showSaveDialog(mainWindow, options)
+        const parent = dialogParent(event);
+        const result = parent
+          ? await dialog.showSaveDialog(parent, options)
           : await dialog.showSaveDialog(options);
         if (result.canceled || !result.filePath) {
           return { ok: true, cancelled: true };
@@ -1190,6 +1263,21 @@ function registerIpc(): void {
       }
     }
   );
+
+  ipcMain.handle(
+    "decompile:search",
+    async (
+      _event,
+      jobId: string,
+      query: string
+    ): Promise<import("../shared/types").DecompileSearchResult> => {
+      try {
+        return decompile.search(String(jobId), String(query));
+      } catch (error) {
+        return resultFromError(error) as never;
+      }
+    }
+  );
 }
 
 async function createWindow(): Promise<void> {
@@ -1244,6 +1332,7 @@ app.on("window-all-closed", () => {
   void embeddedMirror.stopAll();
   logcat.stopAll();
   terminal.stopAll();
+  screenRecorder.stopAll();
   if (process.platform !== "darwin") {
     app.quit();
   }

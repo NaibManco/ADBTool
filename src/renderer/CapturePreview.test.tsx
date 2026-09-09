@@ -49,18 +49,20 @@ describe("CapturePreview", () => {
     expect(html).toContain('src="android-dev-capture://media/image-one"');
   });
 
-  it("renders a standard video player and save action without image-only controls", () => {
+  it("renders a standard video player with zoom toolbar and save action", () => {
     const html = renderToStaticMarkup(
       <CapturePreview media={video} onClose={() => undefined} />
     );
 
     expect(html).toContain("录屏预览");
     expect(html).toContain("<video");
-    expect(html).toContain('class="capture-video-stage"');
+    expect(html).toContain('capture-video-stage fit');
     expect(html).toContain("controls");
     expect(html).toContain("另存为");
     expect(html).toContain("视频信息");
-    expect(html).not.toContain("适应窗口");
+    // 视频与图片共用缩放工具栏：默认适应窗口，可缩放/还原 100%
+    expect(html).toContain("适应窗口");
+    expect(html).toContain("100%");
     expect(html).not.toContain(">复制<");
   });
 

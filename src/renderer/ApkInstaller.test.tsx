@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { AndroidDevice } from "../shared/types";
-import { ApkFailurePrompt, ApkInstaller } from "./ApkInstaller";
+import { ApkFailurePrompt, ApkInstaller, mergeRecentApk } from "./ApkInstaller";
 
 const devices: AndroidDevice[] = [
   {
@@ -42,6 +42,33 @@ describe("ApkInstaller", () => {
     expect(html).toContain("Pixel Two");
     expect(html).toContain('type="radio"');
     expect(html).toContain("选择设备后安装");
+  });
+});
+
+describe("mergeRecentApk", () => {
+  const entry = (path: string, installedAt = 0) => ({
+    path,
+    name: `${path}.apk`,
+    size: 100,
+    installedAt,
+    serial: "serial-one"
+  });
+
+  it("puts the newest install first and dedupes by path", () => {
+    const next = mergeRecentApk(
+      [entry("a"), entry("b"), entry("c")],
+      entry("b", 999)
+    );
+    expect(next.map((item) => item.path)).toEqual(["b", "a", "c"]);
+    expect(next[0].installedAt).toBe(999);
+  });
+
+  it("caps the list at five entries", () => {
+    const next = mergeRecentApk(
+      [entry("a"), entry("b"), entry("c"), entry("d"), entry("e")],
+      entry("f")
+    );
+    expect(next.map((item) => item.path)).toEqual(["f", "a", "b", "c", "d"]);
   });
 });
 

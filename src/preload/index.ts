@@ -9,6 +9,7 @@ import type {
   LogcatEvent,
   MirrorControlInput,
   MirrorManagerEvent,
+  RecordingEndedEvent,
   TerminalEvent,
   ThemeMode
 } from "../shared/types";
@@ -68,6 +69,15 @@ const api: AndroidToolApi = {
     ipcRenderer.invoke("capture:recording-stop", serial),
   listScreenRecordings: () =>
     ipcRenderer.invoke("capture:recording-list"),
+  onRecordingEnded: (callback: (event: RecordingEndedEvent) => void) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: RecordingEndedEvent
+    ) => callback(payload);
+    ipcRenderer.on("capture:recording-ended", listener);
+    return () =>
+      ipcRenderer.removeListener("capture:recording-ended", listener);
+  },
   openAppManagerWindow: () =>
     ipcRenderer.invoke("manager-window:open", "apps"),
   openFileManagerWindow: () =>
@@ -110,6 +120,8 @@ const api: AndroidToolApi = {
     ipcRenderer.invoke("decompile:tree", jobId),
   readDecompileFile: (jobId: string, relPath: string) =>
     ipcRenderer.invoke("decompile:read", jobId, relPath),
+  searchDecompile: (jobId: string, query: string) =>
+    ipcRenderer.invoke("decompile:search", jobId, query),
   sendAction: (serial: string, action: DeviceAction) =>
     ipcRenderer.invoke("device:action", serial, action),
   startLogcat: (serial: string, pid?: number) =>

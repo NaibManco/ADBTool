@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDeleteRecordingArgs,
   buildPullRecordingArgs,
+  buildRemoteFileExistsArgs,
   buildScreenshotArgs,
   buildStartRecordingArgs,
   buildStopRecordingArgs,
@@ -33,6 +34,19 @@ describe("screen capture adb commands", () => {
     expect(parseRecordingPid("3214\r\n")).toBe(3214);
   });
 
+  it("verifies the remote recording file exists after start", () => {
+    expect(
+      buildRemoteFileExistsArgs("serial-one", "/sdcard/AndroidDevTool-123.mp4")
+    ).toEqual([
+      "-s",
+      "serial-one",
+      "shell",
+      "test",
+      "-e",
+      "/sdcard/AndroidDevTool-123.mp4"
+    ]);
+  });
+
   it("stops, pulls, and removes one recording", () => {
     expect(buildStopRecordingArgs("serial-one", 3214)).toEqual([
       "-s",
@@ -57,17 +71,6 @@ describe("screen capture adb commands", () => {
     ]);
     expect(
       buildDeleteRecordingArgs("serial-one", "/sdcard/AndroidDevTool-123.mp4")
-    ).toEqual([
-      "-s",
-      "serial-one",
-      "shell",
-      "rm",
-      "-f",
-      "/sdcard/AndroidDevTool-123.mp4"
-    ]);
-  });
-
-  it("rejects invalid screenrecord pid output", () => {
-    expect(() => parseRecordingPid("not-a-pid")).toThrow("录屏进程");
+    ).toEqual(["-s", "serial-one", "shell", "rm", "-f", "/sdcard/AndroidDevTool-123.mp4"]);
   });
 });

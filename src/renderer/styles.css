@@ -2482,6 +2482,7 @@ footer b {
 .app-manager-header-button,
 .file-manager-header-button,
 .device-info-header-button,
+.decompiler-header-button,
 .apk-header-button {
   min-height: 34px;
   padding: 7px 11px;
@@ -2490,7 +2491,8 @@ footer b {
 
 .app-manager-header-button,
 .file-manager-header-button,
-.device-info-header-button {
+.device-info-header-button,
+.decompiler-header-button {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2505,7 +2507,8 @@ footer b {
 
 .app-manager-header-button:hover,
 .file-manager-header-button:hover,
-.device-info-header-button:hover {
+.device-info-header-button:hover,
+.decompiler-header-button:hover {
   color: #c5eaf5;
   border-color: #46758a;
   background: #172c37;
@@ -2535,6 +2538,32 @@ footer b {
   width: min(520px, calc(100vw - 36px));
   margin: 0;
   box-shadow: 0 15px 45px rgba(0, 0, 0, 0.28);
+}
+
+.workbench-error span {
+  overflow-y: auto;
+  max-height: 40vh;
+  user-select: text;
+  white-space: pre-wrap;
+}
+
+.error-banner .error-copy {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  color: #ffd8da;
+  border: 1px solid #9b4f56;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.error-banner .error-copy:hover {
+  color: #fff1f1;
+  border-color: #c97a82;
+}
+
+.error-banner .error-close {
+  flex-shrink: 0;
+  font-size: 16px;
 }
 
 .success-banner {
@@ -3211,7 +3240,7 @@ footer b {
   white-space: nowrap;
 }
 
-.apk-dropzone > button {
+.apk-dropzone-actions > button {
   display: inline-flex;
   min-height: 32px;
   align-items: center;
@@ -3226,7 +3255,21 @@ footer b {
   cursor: pointer;
 }
 
-.apk-dropzone.has-file > button {
+.apk-dropzone-actions > button:hover:not(:disabled) {
+  border-color: #4c9d8b;
+}
+
+.apk-dropzone-actions > button.apk-clear-file {
+  color: #e8a2a2;
+  border-color: #573438;
+  background: #241719;
+}
+
+.apk-dropzone-actions > button.apk-clear-file:hover:not(:disabled) {
+  border-color: #7b474c;
+}
+
+.apk-dropzone.has-file .apk-dropzone-actions {
   margin-top: 0;
 }
 
@@ -3584,6 +3627,11 @@ footer b {
   color: #7c3038;
 }
 
+:root[data-theme="light"] .error-banner .error-copy {
+  color: #7c3038;
+  border-color: #d58b91;
+}
+
 :root[data-theme="light"] .rail-device-card {
   border-color: #d2dde0;
   background: #fff;
@@ -3616,6 +3664,100 @@ footer b {
   color: #18836d;
   border-color: #9ccfc3;
   background: #e7f5f1;
+}
+
+/* 最近安装：与其他区块同边距（18px），行样式对齐设备列表 */
+.apk-recent {
+  display: grid;
+  min-width: 0;
+  margin: 0 18px 16px;
+}
+
+.apk-recent-label {
+  display: block;
+  margin-bottom: 7px;
+  color: #9aabb2;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.apk-recent > button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+  padding: 10px 11px;
+  color: #c6d4d8;
+  border: 1px solid #273740;
+  border-radius: 9px;
+  background: #10191f;
+  text-align: left;
+  cursor: pointer;
+}
+
+.apk-recent > button:hover:not(:disabled) {
+  color: #e8f0f2;
+  border-color: #3b514f;
+  background: #132027;
+}
+
+.apk-recent > button.selected {
+  color: #7de8c8;
+  border-color: #2d6759;
+  background: #102820;
+}
+
+.apk-recent > button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.apk-recent strong {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.apk-recent > button > span {
+  flex-shrink: 0;
+  color: #6b7f88;
+  font-size: 10.5px;
+}
+
+.apk-dropzone-actions {
+  display: flex;
+  gap: 8px;
+}
+
+:root[data-theme="light"] .apk-recent-label {
+  color: #51656d;
+}
+
+:root[data-theme="light"] .apk-recent > button {
+  color: #43565e;
+  border-color: #c4d2d7;
+  background: #fbfcfc;
+}
+
+:root[data-theme="light"] .apk-recent > button:hover:not(:disabled) {
+  color: #1d333c;
+  border-color: #9db4bc;
+}
+
+:root[data-theme="light"] .apk-recent > button.selected {
+  color: #0e8570;
+  border-color: #9fd9cb;
+  background: #e4f7f1;
+}
+
+:root[data-theme="light"] .apk-recent > button > span {
+  color: #71858d;
 }
 
 :root[data-theme="light"] .apk-header-button {
@@ -4459,7 +4601,8 @@ footer b {
   background: #eef7fa;
 }
 
-:root[data-theme="light"] .device-info-header-button {
+:root[data-theme="light"] .device-info-header-button,
+:root[data-theme="light"] .decompiler-header-button {
   color: #286f86;
   border-color: #a9cbd7;
   background: #eef7fa;
@@ -4643,9 +4786,13 @@ footer b {
     grid-template-columns: 28px minmax(0, 1fr);
   }
 
-  .apk-dropzone.has-file > button {
+  .apk-dropzone.has-file .apk-dropzone-actions {
     grid-column: 1 / -1;
     justify-self: stretch;
+  }
+
+  .apk-dropzone.has-file .apk-dropzone-actions > button {
+    flex: 1;
     justify-content: center;
   }
 }
@@ -4842,6 +4989,12 @@ footer b {
   border-radius: 5px;
   background: #000;
   box-shadow: 0 12px 46px rgba(0, 0, 0, 0.42);
+}
+
+/* 适应模式：视频完整放入可视区域（保持宽高比）；缩放模式沿用上方原生尺寸规则 */
+.capture-video-stage.fit video {
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .capture-preview-info {
@@ -5933,23 +6086,35 @@ footer b {
   gap: 8px;
 }
 
-.decompiler-header-actions button {
+/* 反编译窗口按钮统一规格（与主界面 rail 按钮一致：34px 高/同描边底色） */
+.decompiler-header-actions button,
+.decompiler-viewer-actions button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  height: 32px;
+  min-height: 34px;
   padding: 0 12px;
   color: #aab8bd;
-  border: 1px solid #293840;
+  border: 1px solid #293941;
   border-radius: 7px;
-  background: #121b21;
+  background: #121c22;
   font-size: 11px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.decompiler-header-actions button:hover {
-  color: #dce6e8;
-  border-color: #40515a;
+.decompiler-header-actions button:hover,
+.decompiler-viewer-actions button:hover {
+  color: #e3ecee;
+  border-color: #43565f;
+  background: #18242b;
+}
+
+.decompiler-header-actions button:disabled,
+.decompiler-viewer-actions button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 
 .decompiler-header-actions .decompiler-cancel {
@@ -6095,15 +6260,141 @@ footer b {
   color: #5b707b;
 }
 
+.decompiler-tree-filter > svg {
+  flex-shrink: 0;
+}
+
 .decompiler-tree-filter input {
-  min-width: 0;
-  flex: 1;
+  min-width: 40px;
+  width: 0;
+  flex: 1 1 0;
   padding: 6px 0;
   color: #d6e1e4;
   border: 0;
   outline: 0;
   background: transparent;
   font-size: 11px;
+  caret-color: #d6e1e4;
+}
+
+.decompiler-filter-clear,
+.decompiler-filter-mode {
+  flex-shrink: 0;
+}
+
+.decompiler-tree-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border-bottom: 1px solid #182329;
+  color: #58cdb3;
+  font-size: 11px;
+}
+
+.decompiler-tree-live .loader {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+}
+
+.decompiler-filter-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: #73858e;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.decompiler-filter-clear:hover {
+  color: #dce6e8;
+}
+
+.decompiler-filter-mode {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #26343c;
+  border-radius: 6px;
+  background: #080d11;
+}
+
+.decompiler-filter-mode button {
+  padding: 3px 8px;
+  color: #73858e;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.decompiler-filter-mode button.active {
+  color: #0a1512;
+  background: #3fd9b4;
+  font-weight: 600;
+}
+
+.decompiler-search-list {
+  overflow: auto;
+  flex: 1;
+  padding: 6px 4px;
+  scrollbar-color: #263943 #0a1015;
+}
+
+.decompiler-search-hit {
+  display: block;
+  width: 100%;
+  margin-bottom: 2px;
+  padding: 7px 9px;
+  color: #9fb0b6;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.decompiler-search-hit:hover {
+  background: rgba(65, 215, 183, 0.06);
+  color: #dce6e8;
+}
+
+.decompiler-search-hit.selected {
+  background: rgba(65, 215, 183, 0.12);
+}
+
+.decompiler-search-hit code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #79a7b6;
+  font-size: 10.5px;
+}
+
+.decompiler-search-hit small {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: #6b7f88;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.decompiler-tree-empty .loader {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  vertical-align: -2px;
 }
 
 .decompiler-tree-list {
@@ -6187,32 +6478,82 @@ footer b {
   border-bottom: 1px solid #182329;
 }
 
+.decompiler-viewer-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.decompiler-find {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-bottom: 1px solid #182329;
+  background: #0a1015;
+  color: #5b707b;
+}
+
+.decompiler-find input {
+  min-width: 0;
+  flex: 1;
+  padding: 6px 0;
+  color: #d6e1e4;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: 12px "Cascadia Mono", Consolas, monospace;
+}
+
+.decompiler-find-count {
+  flex-shrink: 0;
+  min-width: 52px;
+  color: #6b7f88;
+  text-align: center;
+  font-size: 10.5px;
+}
+
+.decompiler-find button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: #9fb0b6;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.decompiler-find button:hover:not(:disabled) {
+  color: #dce6e8;
+  border-color: #40515a;
+}
+
+.decompiler-find button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.decompiler-find-mark {
+  color: #ffd479;
+  background: rgba(242, 198, 120, 0.22);
+  border-radius: 2px;
+}
+
+.decompiler-find-mark.current {
+  color: #08110f;
+  background: #3fd9b4;
+}
+
 .decompiler-viewer-header code {
   overflow: hidden;
   color: #79a7b6;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
-}
-
-.decompiler-viewer-header button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
-  height: 28px;
-  padding: 0 10px;
-  color: #aab8bd;
-  border: 1px solid #293840;
-  border-radius: 6px;
-  background: #121b21;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.decompiler-viewer-header button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .decompiler-code {
@@ -6288,15 +6629,40 @@ footer b {
   color: #17252b;
 }
 
-:root[data-theme="light"] .decompiler-header-actions button {
+:root[data-theme="light"] .decompiler-header-actions button,
+:root[data-theme="light"] .decompiler-viewer-actions button {
   color: #4a5e66;
+  border-color: #cbd6da;
+  background: #fff;
+}
+
+:root[data-theme="light"] .decompiler-tree-list,
+:root[data-theme="light"] .decompiler-tree-filter,
+:root[data-theme="light"] .decompiler-tree-live {
+  border-color: #e2eaed;
+}
+
+:root[data-theme="light"] .decompiler-tree-filter input {
+  color: #22333a;
+  caret-color: #22333a;
+}
+
+:root[data-theme="light"] .decompiler-filter-mode {
   border-color: #c4d2d7;
   background: #ffffff;
 }
 
-:root[data-theme="light"] .decompiler-tree-list,
-:root[data-theme="light"] .decompiler-tree-filter {
-  border-color: #e2eaed;
+:root[data-theme="light"] .decompiler-filter-mode button {
+  color: #7d9099;
+}
+
+:root[data-theme="light"] .decompiler-filter-mode button.active {
+  color: #06231d;
+  background: #1fae90;
+}
+
+:root[data-theme="light"] .decompiler-tree-live {
+  color: #0e8570;
 }
 
 :root[data-theme="light"] .decompiler-tree-list {
@@ -6325,12 +6691,6 @@ footer b {
   border-color: #e2eaed;
 }
 
-:root[data-theme="light"] .decompiler-viewer-header button {
-  color: #4a5e66;
-  border-color: #c4d2d7;
-  background: #ffffff;
-}
-
 :root[data-theme="light"] .decompiler-code {
   background: #fbfcfc;
   scrollbar-color: #bccbd0 #fbfcfc;
@@ -6338,6 +6698,63 @@ footer b {
 
 :root[data-theme="light"] .decompiler-code pre {
   color: #34474e;
+}
+
+:root[data-theme="light"] .decompiler-search-list {
+  scrollbar-color: #bccbd0 #fbfcfc;
+}
+
+:root[data-theme="light"] .decompiler-search-hit {
+  color: #43565e;
+}
+
+:root[data-theme="light"] .decompiler-search-hit:hover {
+  background: rgba(38, 174, 145, 0.08);
+  color: #1d333c;
+}
+
+:root[data-theme="light"] .decompiler-search-hit.selected {
+  background: rgba(38, 174, 145, 0.14);
+}
+
+:root[data-theme="light"] .decompiler-search-hit code {
+  color: #39758a;
+}
+
+:root[data-theme="light"] .decompiler-search-hit small {
+  color: #71858d;
+}
+
+:root[data-theme="light"] .decompiler-find {
+  border-color: #e2eaed;
+  background: #f6f9fa;
+}
+
+:root[data-theme="light"] .decompiler-find input {
+  color: #22333a;
+}
+
+:root[data-theme="light"] .decompiler-find-count {
+  color: #71858d;
+}
+
+:root[data-theme="light"] .decompiler-find button {
+  color: #43565e;
+}
+
+:root[data-theme="light"] .decompiler-find button:hover:not(:disabled) {
+  color: #1d333c;
+  border-color: #9db4bc;
+}
+
+:root[data-theme="light"] .decompiler-find-mark {
+  color: #9a6700;
+  background: rgba(242, 198, 120, 0.3);
+}
+
+:root[data-theme="light"] .decompiler-find-mark.current {
+  color: #06231d;
+  background: #1fae90;
 }
 
 :root[data-theme="light"] .decompiler-error pre {

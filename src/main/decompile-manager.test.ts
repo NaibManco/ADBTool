@@ -9,7 +9,8 @@ import {
   buildDecompileTree,
   buildJadxArgs,
   isPreviewableExtension,
-  resolveWithinRoot
+  resolveWithinRoot,
+  searchDecompileOutput
 } from "./decompile-manager";
 
 class FakeJadxProcess extends EventEmitter {
@@ -118,6 +119,49 @@ describe("buildDecompileTree", () => {
     }
     const { nodes, truncated } = buildDecompileTree(root, 3);
     expect(nodes.length).toBe(3);
+    expect(truncated).toBe(true);
+  });
+});
+
+describe("searchDecompileOutput", () => {
+  it("finds matches in file names and text content with context", () => {
+    const root = tempRoot();
+    mkdirSync(path.join(root, "sources", "com"), { recursive: true });
+    writeFileSync(
+      path.join(root, "sources", "com", "LoginActivity.java"),
+      "public class LoginActivity {\n  String token = fetchToken();\n}"
+    );
+    writeFileSync(path.join(root, "sources", "com", "Other.java"), "class Other {}");
+    writeFileSync(path.join(root, "icon.png"), "token");
+
+    const { hits, truncated } = searchDecompileOutput(root, "login");
+    expect(truncated).toBe(false);
+    expect(hits.map((hit) => hit.relPath)).toEqual([
+      "sources/com/LoginActivity.java"
+    ]);
+
+    const content = searchDecompileOutput(root, "token");
+    expect(content.hits.map((hit) => hit.relPath)).toEqual([
+      "sources/com/LoginActivity.java"
+    ]);
+    expect(content.hits[0].context).toContain("token");
+
+    // 二进制后缀不搜内容
+    const binary = searchDecompileOutput(root, "token");
+    expect(binary.hits.some((hit) => hit.relPath === "icon.png")).toBe(false);
+  });
+
+  it("caps results and reports truncation", () => {
+    const root = tempRoot();
+    mkdirSync(path.join(root, "sources"), { recursive: true });
+    for (let index = 0; index < 5; index += 1) {
+      writeFileSync(
+        path.join(root, "sources", `F${index}.java`),
+        "needle"
+      );
+    }
+    const { hits, truncated } = searchDecompileOutput(root, "needle", 3);
+    expect(hits.length).toBe(3);
     expect(truncated).toBe(true);
   });
 });

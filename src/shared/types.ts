@@ -83,6 +83,12 @@ export type DeviceAction =
 
 export type CaptureMediaKind = "image" | "video";
 
+export interface RecordingEndedEvent {
+  serial: string;
+  ok: boolean;
+  message: string;
+}
+
 export interface CaptureMedia {
   id: string;
   kind: CaptureMediaKind;
@@ -279,6 +285,17 @@ export interface DecompileReadResult {
   message?: string;
 }
 
+export interface DecompileSearchHit {
+  relPath: string;
+  context: string;
+}
+
+export interface DecompileSearchResult {
+  hits: DecompileSearchHit[];
+  truncated: boolean;
+  message?: string;
+}
+
 export interface ManagedApp {
   packageName: string;
   apkPath: string;
@@ -349,6 +366,9 @@ export interface AndroidToolApi {
   startScreenRecording(serial: string): Promise<ActionResult>;
   stopScreenRecording(serial: string): Promise<ActionResult>;
   listScreenRecordings(): Promise<ScreenRecordingSession[]>;
+  onRecordingEnded(
+    listener: (event: RecordingEndedEvent) => void
+  ): () => void;
   openAppManagerWindow(): Promise<ActionResult>;
   openFileManagerWindow(): Promise<ActionResult>;
   openDeviceInfoWindow(): Promise<ActionResult>;
@@ -369,6 +389,7 @@ export interface AndroidToolApi {
   discardDecompile(jobId: string): void;
   getDecompileTree(jobId: string): Promise<DecompileTreeResult>;
   readDecompileFile(jobId: string, relPath: string): Promise<DecompileReadResult>;
+  searchDecompile(jobId: string, query: string): Promise<DecompileSearchResult>;
   onDecompileEvent(listener: (event: DecompileEvent) => void): () => void;
   sendAction(serial: string, action: DeviceAction): Promise<ActionResult>;
   startLogcat(serial: string, pid?: number): Promise<ActionResult>;

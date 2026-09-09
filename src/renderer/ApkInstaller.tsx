@@ -28,6 +28,70 @@ function fileFromDrop(file: File): ApkFile {
   return { path, name: file.name, size: file.size };
 }
 
+export interface RecentApk {
+  path: string;
+  name: string;
+  size: number;
+  installedAt: number;
+  serial?: string;
+}
+
+const RECENT_APK_KEY = "androidDevTool.apk.recent.v1";
+const RECENT_APK_CAP = 5;
+
+/** 成功安装后更新最近列表：按路径去重、新的在前、截断到上限。纯函数供单测。 */
+export function mergeRecentApk(
+  current: RecentApk[],
+  entry: RecentApk,
+  cap = RECENT_APK_CAP
+): RecentApk[] {
+  return [entry, ...current.filter((item) => item.path !== entry.path)].slice(
+    0,
+    cap
+  );
+}
+
+function readRecentApks(): RecentApk[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_APK_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (item): item is RecentApk =>
+          Boolean(item) &&
+          typeof item === "object" &&
+          typeof (item as RecentApk).path === "string" &&
+          typeof (item as RecentApk).name === "string"
+      )
+      .slice(0, RECENT_APK_CAP);
+  } catch {
+    return [];
+  }
+}
+
+function writeRecentApks(list: RecentApk[]): void {
+  try {
+    window.localStorage.setItem(RECENT_APK_KEY, JSON.stringify(list));
+  } catch {
+    // 存储不可用时历史仅保留在本次会话内存中
+  }
+}
+
+function formatInstalledAt(timestamp: number): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  return sameDay
+    ? `今天 ${time}`
+    : `${date.getMonth() + 1}/${date.getDate()} ${time}`;
+}
+
 export function ApkFailurePrompt({
   failure,
   onForceDowngrade
@@ -67,6 +131,9 @@ export function ApkInstaller({
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [installFailure, setInstallFailure] = useState<ApkInstallFailure | undefined>();
+  const [recentApks, setRecentApks] = useState<RecentApk[]>(() =>
+    readRecentApks()
+  );
   const installing = installState === "installing";
 
   useEffect(() => {
@@ -156,11 +223,47 @@ export function ApkInstaller({
       setProgress(100);
       setInstallState("success");
       setMessage(`已安装到 ${deviceLabel(onlineDevices.find((item) => item.serial === selectedSerial)!)}。`);
+      // 记录最近安装（失败不记录）
+      const entry: RecentApk = {
+        path: apk.path,
+        name: apk.name,
+        size: apk.size,
+        installedAt: Date.now(),
+        serial: selectedSerial
+      };
+      setRecentApks((current) => {
+        const next = mergeRecentApk(current, entry);
+        writeRecentApks(next);
+        return next;
+      });
     } catch (error) {
       setInstallState("error");
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       window.clearInterval(timer);
+    }
+  }
+
+  /** 选择历史安装文件：校验路径仍有效，载入并预选上次的目标设备。 */
+  async function pickRecentApk(recent: RecentApk): Promise<void> {
+    try {
+      const resolved = await window.androidTool.resolveApkPath(recent.path);
+      setFile(resolved);
+      setManualPath(resolved.path);
+      resetInstallState();
+      if (
+        recent.serial &&
+        onlineDevices.some((device) => device.serial === recent.serial)
+      ) {
+        setSelectedSerial(recent.serial);
+      }
+    } catch (error) {
+      setFile(undefined);
+      setInstallState("error");
+      setInstallFailure(undefined);
+      setMessage(
+        `历史文件已不可用：${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -210,10 +313,27 @@ export function ApkInstaller({
               <span>也可以从电脑中选择文件</span>
             </div>
           )}
-          <button onClick={() => void chooseFile()} disabled={installing}>
-            <FolderOpen size={16} />
-            {file ? "更换文件" : "选择 APK"}
-          </button>
+          <div className="apk-dropzone-actions">
+            <button onClick={() => void chooseFile()} disabled={installing}>
+              <FolderOpen size={16} />
+              {file ? "更换文件" : "选择 APK"}
+            </button>
+            {file && (
+              <button
+                className="apk-clear-file"
+                onClick={() => {
+                  setFile(undefined);
+                  setManualPath("");
+                  resetInstallState();
+                }}
+                disabled={installing}
+                title="清除已选的安装包"
+              >
+                <X size={16} />
+                清除
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="apk-path-entry">
@@ -245,6 +365,30 @@ export function ApkInstaller({
           </div>
           <span>支持本机绝对路径，按 Enter 可校验并载入文件</span>
         </div>
+
+        {recentApks.length > 0 && (
+          <div className="apk-recent">
+            <span className="apk-recent-label">最近安装（点击直接选用）</span>
+            {recentApks.map((recent) => (
+              <button
+                key={recent.path}
+                type="button"
+                className={
+                  file?.path === recent.path ? "selected" : ""
+                }
+                disabled={installing}
+                onClick={() => void pickRecentApk(recent)}
+                title={recent.path}
+              >
+                <strong>{recent.name}</strong>
+                <span>
+                  {formatSize(recent.size)} · {formatInstalledAt(recent.installedAt)}
+                  {recent.serial ? ` · ${recent.serial}` : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
 
         <fieldset className="apk-device-list" disabled={installing}>
           <legend>选择目标设备</legend>

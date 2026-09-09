@@ -13,6 +13,25 @@
 - `src/main/paths.ts` — `resolveJavaExecutable`（JAVA_HOME → AS JBR 常见路径 → PATH）、`resolveJadxJarPath`（`JADX_PATH` → resources/jadx → 常见安装路径 → cwd vendor；校验 lib 下 `jadx-*-all.jar`）。
 - `vendor/jadx/` — jadx 1.5.6 发行包（bin + lib/jadx-1.5.6-all.jar 76MB），extraResources 打包为 `resources/jadx`。
 
+## 交互模型：渐进浏览（懒加载的落地方式）
+
+拖入后**不是等全量完成**才能看：jadx 是渐进写盘的（实测 27MB APK：2.8s 起文件开始落地、4s 已 656 个、14s 全量 5362 个）。渲染层利用这一点：
+
+- running 阶段每 2s 轮询 `getDecompileTree`，树里出现文件即切换为「树+查看器」视图，顶部绿色角标显示「正在反编译 · 已生成 N 项，可直接浏览」。
+- 渐进刷新**不重置**用户已展开的目录与选中（仅首次设置默认展开）。
+- `tree()`/`readFile()` 主进程侧不检查运行状态，天然支持进行中读取——不要加"完成才可读"的门禁。
+- 曾评估的替代方案及否决原因：`--single-class` 按需解单类（每次 ~3s JVM 冷启动，点 10 个类 30s，不可接受）；Node 自解析 dex 类清单（重写 dex 解析器，复杂度不成比例）。
+
+## 搜索（两个层次，别混）
+
+1. **文件内查找**（Ctrl+F，用户主用）：查看器头部「查找」按钮或快捷键唤起查找栏；输入即高亮当前文件全部命中（≤2000 个，大小写不敏感，纯渲染层 `findAllIndices` + `renderWithFindHighlights` 切分，`mark` 段），计数 N/M，Enter/↓↓ 跳转（Shift+Enter 上一个）并滚动居中，Esc 关闭。内容在渲染层内存里，不涉及 IPC。
+2. **产物全文搜索**（树顶「路径 | 全文」模式切换）：搜整个反编译产物（文件名 + 文本内容）。
+
+全文搜索语义：文件名匹配或**文本文件内容**包含关键词（大小写不敏感）；二进制后缀跳过内容、单文件采样 ≤2MB、结果上限 500 条（`searchDecompileOutput` 纯函数 + 单测）。
+
+- 全文搜索渲染层 300ms 防抖；点结果自动切回树视图、展开父目录链并打开文件；渐进阶段文件未入树时按路径直读（兜底）。
+- 反编译进行中两者都可用（搜/看的是已落盘部分）。
+
 ## 调用链（探针实证）
 
 ```

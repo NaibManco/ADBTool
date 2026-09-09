@@ -69,9 +69,9 @@ export function CapturePreview({
   media: CaptureMedia;
   onClose: () => void;
 }) {
-  const imageStageRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(100);
-  const [fitImage, setFitImage] = useState(true);
+  const [fitMedia, setFitMedia] = useState(true);
   const [operating, setOperating] = useState(false);
   const [status, setStatus] = useState<ActionResult>();
   const [videoInfo, setVideoInfo] = useState<{
@@ -82,7 +82,7 @@ export function CapturePreview({
 
   useEffect(() => {
     setZoom(100);
-    setFitImage(true);
+    setFitMedia(true);
     setOperating(false);
     setStatus(undefined);
     setVideoInfo(undefined);
@@ -105,20 +105,22 @@ export function CapturePreview({
   }
 
   function currentFitZoom(): number {
-    const stage = imageStageRef.current;
-    if (!stage || !media.width || !media.height) return 100;
+    const stage = stageRef.current;
+    const width = isImage ? media.width : videoInfo?.width;
+    const height = isImage ? media.height : videoInfo?.height;
+    if (!stage || !width || !height) return 100;
     return calculateFitImageZoom(
       stage.clientWidth,
       stage.clientHeight,
-      media.width,
-      media.height
+      width,
+      height
     );
   }
 
-  function centerImageAfterRender(): void {
+  function centerAfterRender(): void {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        const stage = imageStageRef.current;
+        const stage = stageRef.current;
         if (!stage) return;
         stage.scrollLeft = Math.max(0, (stage.scrollWidth - stage.clientWidth) / 2);
         stage.scrollTop = Math.max(0, (stage.scrollHeight - stage.clientHeight) / 2);
@@ -127,19 +129,19 @@ export function CapturePreview({
   }
 
   function changeZoom(delta: number): void {
-    const baseZoom = fitImage ? currentFitZoom() : zoom;
-    setFitImage(false);
+    const baseZoom = fitMedia ? currentFitZoom() : zoom;
+    setFitMedia(false);
     setZoom(clampImageZoom(baseZoom + delta));
-    centerImageAfterRender();
+    centerAfterRender();
   }
 
-  function handleImageWheel(event: WheelEvent<HTMLDivElement>): void {
+  function handleStageWheel(event: WheelEvent<HTMLDivElement>): void {
     event.preventDefault();
     if (event.deltaY === 0) return;
-    const baseZoom = fitImage ? currentFitZoom() : zoom;
-    setFitImage(false);
+    const baseZoom = fitMedia ? currentFitZoom() : zoom;
+    setFitMedia(false);
     setZoom(nextWheelZoom(baseZoom, event.deltaY));
-    centerImageAfterRender();
+    centerAfterRender();
   }
 
   function readVideoInfo(event: SyntheticEvent<HTMLVideoElement>): void {
@@ -156,6 +158,7 @@ export function CapturePreview({
   const MediaIcon = isImage ? ImageSquare : VideoCamera;
   const width = isImage ? media.width : videoInfo?.width;
   const height = isImage ? media.height : videoInfo?.height;
+  const mediaWidth = isImage ? media.width : videoInfo?.width;
 
   return (
     <section className="capture-preview" aria-label={previewTitle}>
@@ -194,29 +197,36 @@ export function CapturePreview({
         <main className="capture-preview-stage">
           {isImage ? (
             <div
-              ref={imageStageRef}
-              className={fitImage ? "capture-image-stage fit" : "capture-image-stage"}
-              onWheel={handleImageWheel}
+              ref={stageRef}
+              className={fitMedia ? "capture-image-stage fit" : "capture-image-stage"}
+              onWheel={handleStageWheel}
             >
               <div className="capture-image-canvas">
                 <img
                   src={media.url}
                   alt={`${media.name} 预览`}
                   draggable={false}
-                  style={fitImage || !media.width
+                  style={fitMedia || !media.width
                     ? undefined
                     : { width: `${media.width * zoom / 100}px` }}
                 />
               </div>
             </div>
           ) : (
-            <div className="capture-video-stage">
+            <div
+              ref={stageRef}
+              className={fitMedia ? "capture-video-stage fit" : "capture-video-stage"}
+              onWheel={handleStageWheel}
+            >
               <video
                 key={media.id}
                 src={media.url}
                 controls
                 preload="metadata"
                 onLoadedMetadata={readVideoInfo}
+                style={fitMedia || !mediaWidth
+                  ? undefined
+                  : { width: `${mediaWidth * zoom / 100}px` }}
               >
                 当前系统无法播放该录屏文件。
               </video>
@@ -243,31 +253,29 @@ export function CapturePreview({
         </aside>
       </div>
 
-      {isImage && (
-        <footer className="capture-zoom-toolbar">
-          <button onClick={() => changeZoom(-ZOOM_STEP)} disabled={!fitImage && zoom <= MIN_ZOOM}>
-            <MagnifyingGlassMinus size={15} />
-            缩小
-          </button>
-          <strong>{fitImage ? "适应" : `${zoom}%`}</strong>
-          <button onClick={() => changeZoom(ZOOM_STEP)} disabled={!fitImage && zoom >= MAX_ZOOM}>
-            <MagnifyingGlassPlus size={15} />
-            放大
-          </button>
-          <i />
-          <button onClick={() => setFitImage(true)} className={fitImage ? "active" : ""}>
-            <ArrowsOutSimple size={15} />
-            适应窗口
-          </button>
-          <button onClick={() => {
-            setFitImage(false);
-            setZoom(100);
-            centerImageAfterRender();
-          }}>
-            100%
-          </button>
-        </footer>
-      )}
+      <footer className="capture-zoom-toolbar">
+        <button onClick={() => changeZoom(-ZOOM_STEP)} disabled={!fitMedia && zoom <= MIN_ZOOM}>
+          <MagnifyingGlassMinus size={15} />
+          缩小
+        </button>
+        <strong>{fitMedia ? "适应" : `${zoom}%`}</strong>
+        <button onClick={() => changeZoom(ZOOM_STEP)} disabled={!fitMedia && zoom >= MAX_ZOOM}>
+          <MagnifyingGlassPlus size={15} />
+          放大
+        </button>
+        <i />
+        <button onClick={() => setFitMedia(true)} className={fitMedia ? "active" : ""}>
+          <ArrowsOutSimple size={15} />
+          适应窗口
+        </button>
+        <button onClick={() => {
+          setFitMedia(false);
+          setZoom(100);
+          centerAfterRender();
+        }}>
+          100%
+        </button>
+      </footer>
     </section>
   );
 }
