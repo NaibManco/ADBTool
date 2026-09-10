@@ -62,6 +62,7 @@ docs\modules\
 ├─ app-shell.md        应用外壳与工作区：窗口/路由/布局/主题/设置
 ├─ adb-device.md       ADB 与设备控制：命令构造、设备发现、按键/重启
 ├─ mirror.md           投屏：内嵌视频流（@yume-chan）+ 外部 scrcpy 窗口
+├─ clipboard-sync.md   剪贴板双向同步（PC ↔ 设备，隐藏 scrcpy 会话）
 ├─ logcat.md           Logcat：查询语法、缓冲区、导出、跟随滚动
 ├─ terminal.md         终端：每设备交互式 adb shell
 ├─ capture.md          截图与录屏：预览浮层与媒体协议
@@ -82,6 +83,7 @@ docs\modules\
 - 右侧工作区在「投屏」「日志」「终端」整页视图间切换，切换钮仅在有多个内容时显示（切走的会话保活），偏好持久化在 localStorage；截图/录屏预览以浮层覆盖，不中断底层会话。
 - Logcat 查询语法过滤（tag:/message:/pid:/tid:/level:/package:、~ 正则、- 取反、引号短语，对齐 Android Studio）、缓冲区切换（main/system/crash/radio/events）、导出/复制、渲染窗口与跟随滚动、查询历史。
 - 每设备交互式 Shell 终端（`adb -s <serial> shell` 持久会话）：从设备卡打开即针对该设备，输出实时流（ANSI 清理），输入行带本地历史（↑↓）与 Ctrl+C 发送；vi/top 等全屏交互程序不支持。
+- 剪贴板双向同步（按设备开关，设备卡头部图标）：设备复制自动到电脑、电脑复制自动到设备，防回环；基于隐藏 scrcpy 会话，不依赖投屏。
 - Back、Home、最近任务、电源和重启等设备操作。
 - scrcpy 启动参数必须保留 `--no-audio`，避免电脑接管设备音频输出。
 - 应用进程过滤会展示包名/进程列表，由用户选择，不要擅自只取第一个前台进程。

@@ -36,8 +36,10 @@ describe("App", () => {
         recording={false}
         recordingSeconds={0}
         bugreporting={false}
+        clipboardSync={false}
         onMirror={() => undefined}
         onTerminal={() => undefined}
+        onClipboardSync={() => undefined}
         onAction={async () => undefined}
         onScreenshot={async () => undefined}
         onRecording={async () => undefined}

@@ -14,6 +14,7 @@ import {
   CaretDoubleRight,
   Camera,
   Circle,
+  Clipboard as ClipboardIcon,
   CodeBlock,
   Cpu,
   DeviceMobile,
@@ -288,8 +289,10 @@ export function DeviceRailCard({
   recording,
   recordingSeconds,
   bugreporting,
+  clipboardSync,
   onMirror,
   onTerminal,
+  onClipboardSync,
   onAction,
   onScreenshot,
   onRecording,
@@ -303,8 +306,10 @@ export function DeviceRailCard({
   recording: boolean;
   recordingSeconds: number;
   bugreporting: boolean;
+  clipboardSync: boolean;
   onMirror: (device: AndroidDevice) => void;
   onTerminal: (device: AndroidDevice) => void;
+  onClipboardSync: (device: AndroidDevice, enabled: boolean) => void;
   onAction: (device: AndroidDevice, action: DeviceAction) => Promise<void>;
   onScreenshot: (device: AndroidDevice) => Promise<void>;
   onRecording: (device: AndroidDevice) => Promise<void>;
@@ -332,10 +337,24 @@ export function DeviceRailCard({
       <header>
         <span className="rail-phone"><DeviceMobile size={20} /></span>
         <span>
-          <strong>{deviceName(device)}</strong>
+          <span className="rail-name-line">
+            <strong>{deviceName(device)}</strong>
+            <i className={`rail-state rail-state--${device.state}`} title={statusText(device.state)} />
+          </span>
           <code>{device.serial}</code>
         </span>
-        <i className={`rail-state rail-state--${device.state}`} title={statusText(device.state)} />
+        <button
+          className={clipboardSync ? "rail-clip-sync active" : "rail-clip-sync"}
+          disabled={!ready}
+          onClick={() => onClipboardSync(device, !clipboardSync)}
+          title={
+            clipboardSync
+              ? "剪贴板同步开启中（双向自动），点击关闭"
+              : "开启剪贴板双向同步（电脑与这台设备自动共享复制内容）"
+          }
+        >
+          <ClipboardIcon size={18} weight={clipboardSync ? "fill" : "regular"} />
+        </button>
       </header>
 
       <div className="rail-primary-actions">
@@ -621,6 +640,9 @@ export function App() {
   const [activeMirrorSerial, setActiveMirrorSerial] = useState("");
   const [terminalDevices, setTerminalDevices] = useState<AndroidDevice[]>([]);
   const [activeTerminalSerial, setActiveTerminalSerial] = useState("");
+  const [clipboardSyncSerials, setClipboardSyncSerials] = useState<
+    Set<string>
+  >(new Set());
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() =>
     readWorkspaceView()
   );
@@ -644,8 +666,12 @@ export function App() {
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
-      const nextDevices = await window.androidTool.listDevices();
+      const [nextDevices, syncSerials] = await Promise.all([
+        window.androidTool.listDevices(),
+        window.androidTool.getClipboardSyncSerials().catch(() => [] as string[])
+      ]);
       setDevices(nextDevices);
+      setClipboardSyncSerials(new Set(syncSerials));
       setLogDevices((current) =>
         current.map(
           (selected) =>
@@ -856,6 +882,23 @@ export function App() {
     setWorkspaceView("terminal");
     setActiveTerminalSerial(device.serial);
     setTerminalDevices((current) => [...current, device]);
+  }
+
+  // 剪贴板双向同步（每设备独立开关，主进程持隐藏会话）
+  function toggleClipboardSync(device: AndroidDevice, enabled: boolean): void {
+    void window.androidTool
+      .setClipboardSync(device.serial, enabled)
+      .then((result) => {
+        setClipboardSyncSerials((current) => {
+          const next = new Set(current);
+          if (result.ok && enabled) next.add(device.serial);
+          else next.delete(device.serial);
+          return next;
+        });
+        if (!result.ok) {
+          setError(result.message || "剪贴板同步设置失败");
+        }
+      });
   }
 
   // 弹出窗口 = 换用外部 scrcpy 大屏，同时自动关闭内嵌投屏
@@ -1182,8 +1225,10 @@ export function App() {
                     (recordingNow - (recordingStarts.get(device.serial) ?? recordingNow)) / 1_000
                   )}
                   bugreporting={bugreportSerial === device.serial}
+                  clipboardSync={clipboardSyncSerials.has(device.serial)}
                   onMirror={toggleMirror}
                   onTerminal={toggleTerminal}
+                  onClipboardSync={toggleClipboardSync}
                   onAction={sendAction}
                   onScreenshot={captureScreenshot}
                   onRecording={toggleRecording}

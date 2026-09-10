@@ -378,6 +378,8 @@ export interface AndroidToolApi {
   removeLogcatWindowDevice(serial: string): Promise<void>;
   startMirror(serial: string, label: string): Promise<ActionResult>;
   stopMirror(serial: string): Promise<ActionResult>;
+  setClipboardSync(serial: string, enabled: boolean): Promise<ActionResult>;
+  getClipboardSyncSerials(): Promise<string[]>;
   startEmbeddedMirror(serial: string): Promise<ActionResult>;
   stopEmbeddedMirror(serial: string): Promise<ActionResult>;
   sendMirrorControl(serial: string, input: MirrorControlInput): void;

@@ -95,6 +95,10 @@ const api: AndroidToolApi = {
   startMirror: (serial: string, label: string) =>
     ipcRenderer.invoke("mirror:start", serial, label),
   stopMirror: (serial: string) => ipcRenderer.invoke("mirror:stop", serial),
+  setClipboardSync: (serial: string, enabled: boolean) =>
+    ipcRenderer.invoke("clipboard-sync:set", serial, enabled),
+  getClipboardSyncSerials: () =>
+    ipcRenderer.invoke("clipboard-sync:list"),
   startEmbeddedMirror: (serial: string) =>
     ipcRenderer.invoke("mirror:embedded-start", serial),
   stopEmbeddedMirror: (serial: string) =>

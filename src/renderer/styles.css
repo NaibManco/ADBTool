@@ -2694,8 +2694,15 @@ footer b {
   display: grid;
   min-width: 0;
   align-items: center;
-  grid-template-columns: 30px minmax(0, 1fr) 8px;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
   gap: 9px;
+}
+
+.rail-name-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
 }
 
 .rail-phone {
@@ -2733,6 +2740,7 @@ footer b {
 
 .rail-state {
   display: block;
+  flex-shrink: 0;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -2813,6 +2821,36 @@ footer b {
 .rail-terminal {
   color: #b3a7e0;
   border-color: #4a4265;
+}
+
+.rail-clip-sync {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0;
+  color: #5b707b;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.rail-clip-sync:hover:not(:disabled) {
+  color: #dce6e8;
+  border-color: #40515a;
+}
+
+.rail-clip-sync.active {
+  color: #58cdb3;
+  border-color: #306a5c;
+}
+
+.rail-clip-sync:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .rail-action-grid {
@@ -6043,6 +6081,20 @@ footer b {
 :root[data-theme="light"] .rail-terminal {
   color: #5c5390;
   border-color: #c3bce0;
+}
+
+:root[data-theme="light"] .rail-clip-sync {
+  color: #7d9099;
+}
+
+:root[data-theme="light"] .rail-clip-sync:hover:not(:disabled) {
+  color: #22333a;
+  border-color: #9db4bc;
+}
+
+:root[data-theme="light"] .rail-clip-sync.active {
+  color: #0e8570;
+  border-color: #9fd9cb;
 }
 
 /* ===== APK 反编译窗口 ===== */

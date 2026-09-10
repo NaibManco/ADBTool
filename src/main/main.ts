@@ -34,6 +34,7 @@ import type {
 } from "../shared/types";
 import { LOGCAT_BUFFERS } from "../shared/types";
 import { AdbClient, ApkInstallError } from "./adb";
+import { ClipboardSyncManager } from "./clipboard-sync-manager";
 import { DecompileManager } from "./decompile-manager";
 import { EmbeddedMirrorManager } from "./embedded-mirror-manager";
 import { LogcatManager } from "./logcat-manager";
@@ -144,6 +145,18 @@ const screenRecorder = new ScreenRecorder(
     }
   },
   readScrcpyServerBytes
+);
+const clipboardSync = new ClipboardSyncManager(
+  resolveAdbPath(),
+  () => resolveScrcpyServerPath(),
+  readScrcpyServerBytes,
+  (serial, message) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send("clipboard-sync:event", { serial, message });
+      }
+    }
+  }
 );
 
 function resolveJadxJarPathSafe(): string {
@@ -742,6 +755,30 @@ function registerIpc(): void {
   );
 
   ipcMain.handle(
+    "clipboard-sync:set",
+    async (_event, serial: string, enabled: boolean): Promise<ActionResult> => {
+      try {
+        assertSerial(serial);
+        if (enabled) {
+          await clipboardSync.enable(serial);
+          return { ok: true, message: "剪贴板同步已开启（双向）" };
+        }
+        const stopped = clipboardSync.disable(serial);
+        return {
+          ok: true,
+          message: stopped ? "剪贴板同步已关闭" : "剪贴板同步未开启"
+        };
+      } catch (error) {
+        return resultFromError(error);
+      }
+    }
+  );
+
+  ipcMain.handle("clipboard-sync:list", () =>
+    clipboardSync.runningSerials()
+  );
+
+  ipcMain.handle(
     "mirror:embedded-start",
     async (_event, serial: string): Promise<ActionResult> => {
       try {
@@ -1325,6 +1362,7 @@ app.whenReady().then(async () => {
 app.on("before-quit", () => {
   captureMedia?.cleanup();
   decompile.cleanup();
+  clipboardSync.disableAll();
 });
 
 app.on("window-all-closed", () => {
@@ -1333,6 +1371,7 @@ app.on("window-all-closed", () => {
   logcat.stopAll();
   terminal.stopAll();
   screenRecorder.stopAll();
+  clipboardSync.disableAll();
   if (process.platform !== "darwin") {
     app.quit();
   }
