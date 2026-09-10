@@ -3704,22 +3704,62 @@ footer b {
   background: #e7f5f1;
 }
 
-/* 最近安装：与其他区块同边距（18px），行样式对齐设备列表 */
+/* 最近安装：整块大线框，默认收起，点击标题展开 */
 .apk-recent {
-  display: grid;
   min-width: 0;
   margin: 0 18px 16px;
+  padding: 0 11px;
+  border: 1px solid #273740;
+  border-radius: 9px;
+  background: #101a20;
 }
 
-.apk-recent-label {
-  display: block;
-  margin-bottom: 7px;
-  color: #9aabb2;
-  font-size: 11px;
+.apk-recent-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  color: #c6d4d8;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
   font-weight: 600;
+  cursor: pointer;
 }
 
-.apk-recent > button {
+.apk-recent-toggle:hover:not(:disabled) {
+  color: #e8f0f2;
+}
+
+.apk-recent-toggle small {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #647780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-weight: 400;
+}
+
+.apk-recent-toggle svg {
+  flex-shrink: 0;
+  color: #647780;
+  transition: transform 0.15s ease;
+}
+
+.apk-recent-toggle svg.open {
+  transform: rotate(180deg);
+}
+
+.apk-recent-list {
+  display: grid;
+  margin: 0 0 9px;
+}
+
+.apk-recent-list > button {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -3728,31 +3768,37 @@ footer b {
   margin-bottom: 7px;
   padding: 10px 11px;
   color: #c6d4d8;
-  border: 1px solid #273740;
-  border-radius: 9px;
-  background: #10191f;
+  border: 1px solid #223038;
+  border-radius: 7px;
+  background: #0c141a;
   text-align: left;
   cursor: pointer;
 }
 
-.apk-recent > button:hover:not(:disabled) {
+.apk-recent-list > button:hover:not(:disabled) {
   color: #e8f0f2;
   border-color: #3b514f;
   background: #132027;
 }
 
-.apk-recent > button.selected {
+.apk-recent-list > button.selected {
   color: #7de8c8;
   border-color: #2d6759;
   background: #102820;
 }
 
-.apk-recent > button:disabled {
+.apk-recent-list > button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.apk-recent strong {
+.apk-recent-hint {
+  margin: 2px 2px 0;
+  color: #647780;
+  font-size: 10px;
+}
+
+.apk-recent-list strong {
   overflow: hidden;
   min-width: 0;
   flex: 1;
@@ -3762,7 +3808,7 @@ footer b {
   font-weight: 500;
 }
 
-.apk-recent > button > span {
+.apk-recent-list > button > span {
   flex-shrink: 0;
   color: #6b7f88;
   font-size: 10.5px;
@@ -3773,28 +3819,43 @@ footer b {
   gap: 8px;
 }
 
-:root[data-theme="light"] .apk-recent-label {
-  color: #51656d;
-}
-
-:root[data-theme="light"] .apk-recent > button {
-  color: #43565e;
+:root[data-theme="light"] .apk-recent {
   border-color: #c4d2d7;
   background: #fbfcfc;
 }
 
-:root[data-theme="light"] .apk-recent > button:hover:not(:disabled) {
+:root[data-theme="light"] .apk-recent-toggle {
+  color: #43565e;
+}
+
+:root[data-theme="light"] .apk-recent-toggle:hover:not(:disabled) {
+  color: #1d333c;
+}
+
+:root[data-theme="light"] .apk-recent-toggle small,
+:root[data-theme="light"] .apk-recent-toggle svg {
+  color: #71858d;
+}
+
+:root[data-theme="light"] .apk-recent-list > button {
+  color: #43565e;
+  border-color: #d4dfe3;
+  background: #f6f9fa;
+}
+
+:root[data-theme="light"] .apk-recent-list > button:hover:not(:disabled) {
   color: #1d333c;
   border-color: #9db4bc;
 }
 
-:root[data-theme="light"] .apk-recent > button.selected {
+:root[data-theme="light"] .apk-recent-list > button.selected {
   color: #0e8570;
   border-color: #9fd9cb;
   background: #e4f7f1;
 }
 
-:root[data-theme="light"] .apk-recent > button > span {
+:root[data-theme="light"] .apk-recent-list > button > span,
+:root[data-theme="light"] .apk-recent-hint {
   color: #71858d;
 }
 

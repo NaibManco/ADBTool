@@ -1,6 +1,7 @@
 import { useEffect, useState, type DragEvent as ReactDragEvent } from "react";
 import {
   AndroidLogo,
+  CaretDown,
   CheckCircle,
   FileArrowUp,
   FolderOpen,
@@ -134,6 +135,7 @@ export function ApkInstaller({
   const [recentApks, setRecentApks] = useState<RecentApk[]>(() =>
     readRecentApks()
   );
+  const [recentOpen, setRecentOpen] = useState(false);
   const installing = installState === "installing";
 
   useEffect(() => {
@@ -367,26 +369,45 @@ export function ApkInstaller({
         </div>
 
         {recentApks.length > 0 && (
-          <div className="apk-recent">
-            <span className="apk-recent-label">最近安装（点击直接选用）</span>
-            {recentApks.map((recent) => (
-              <button
-                key={recent.path}
-                type="button"
-                className={
-                  file?.path === recent.path ? "selected" : ""
-                }
-                disabled={installing}
-                onClick={() => void pickRecentApk(recent)}
-                title={recent.path}
-              >
-                <strong>{recent.name}</strong>
-                <span>
-                  {formatSize(recent.size)} · {formatInstalledAt(recent.installedAt)}
-                  {recent.serial ? ` · ${recent.serial}` : ""}
-                </span>
-              </button>
-            ))}
+          <div className={recentOpen ? "apk-recent open" : "apk-recent"}>
+            <button
+              type="button"
+              className="apk-recent-toggle"
+              onClick={() => setRecentOpen((open) => !open)}
+              aria-expanded={recentOpen}
+              disabled={installing}
+            >
+              <span>最近安装</span>
+              <small>点击条目可快速重装</small>
+              <CaretDown
+                size={13}
+                weight="bold"
+                className={recentOpen ? "open" : ""}
+              />
+            </button>
+            {recentOpen && (
+              <div className="apk-recent-list">
+                {recentApks.map((recent) => (
+                  <button
+                    key={recent.path}
+                    type="button"
+                    className={
+                      file?.path === recent.path ? "selected" : ""
+                    }
+                    disabled={installing}
+                    onClick={() => void pickRecentApk(recent)}
+                    title={recent.path}
+                  >
+                    <strong>{recent.name}</strong>
+                    <span>
+                      {formatSize(recent.size)} · {formatInstalledAt(recent.installedAt)}
+                      {recent.serial ? ` · ${recent.serial}` : ""}
+                    </span>
+                  </button>
+                ))}
+                <p className="apk-recent-hint">选中条目会自动带上上次安装的设备</p>
+              </div>
+            )}
           </div>
         )}
 
