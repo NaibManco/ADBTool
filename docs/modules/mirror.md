@@ -21,18 +21,25 @@
 
 ## 会话链路（两种形态共用）
 
-1. `mirror:embedded-start` → `EmbeddedMirrorManager.start(serial)`：
-   - `adb start-server` 预热 → `AdbServerNodeJsClient().createAdb({serial})`（连本机 adb server 5037，与 adb CLI 无冲突）→ `AdbScrcpyClient.pushServer`（内置 scrcpy-server 4.0 字节，读取失败清缓存可重试）→ `AdbScrcpyClient.start(adb, "/data/local/tmp/scrcpy-server.jar", new AdbScrcpyOptions4_0({audio:false, control:true, tunnelForward:true, videoCodec:"h264", videoBitRate:8M, maxSize:1600}))`。
+1. `mirror:embedded-start` → `EmbeddedMirrorManager.start(serial, sender)`：
+   - `adb start-server` 预热 → `AdbServerNodeJsClient().createAdb({serial})`（连本机 adb server 5037，与 adb CLI 无冲突）→ `AdbScrcpyClient.pushServer`（内置 scrcpy-server 4.0 字节，读取失败清缓存可重试）→ `AdbScrcpyClient.start(adb, "/data/local/tmp/scrcpy-server.jar", new AdbScrcpyOptions4_0({audio:false, control:true, tunnelForward:true, videoCodec:"h264", videoBitRate:8M, maxSize:1600, videoCodecOptions:"i-frame-interval=2"}))`。
    - **CJS 主进程加载 ESM-only 依赖**：顶部 `require("@yume-chan/...") as typeof import(...)`（Electron Node ≥22.12 支持 require(esm)；类型桥接用 `as unknown as Parameters<...>` 解决 stream void/undefined 方差）。
-2. 视频包广播（`mirror:event`，发全部窗口）：`meta{codec,deviceName}` → `video{kind: configuration|data|session}` → `status{running,message}`。会话已存在时 start 补发缓存的 meta/configuration/status（面板/窗口重开即接上，resync 语义）。
-3. 渲染层解码（MirrorPane 与 MirrorWindow 相同模式）：`WebCodecsVideoDecoder`，packets ReadableStream 在 meta 前先建好（不丢包）pipe 进 `decoder.writable`；canvas 用 `replaceChildren` 挂进宿主。
+2. 视频包广播（`mirror:event`，发全部窗口）：`meta{codec,deviceName}` → `video{kind: configuration|data|session}` → `status{running,message}`。会话已存在时 start 走 **resync**：把缓存的 meta/configuration/**GOP 数据包**（见下）**定向**补发给请求方 webContents，再发 status:true（广播闭包带 target 参数；GOP 重放绝不能广播，否则已有观众的流里会混入重复包）。
+3. 渲染层解码（MirrorPane 与 MirrorWindow 相同模式）：`WebCodecsVideoDecoder`，packets ReadableStream 在 meta 前先建好（不丢包）pipe 进 `decoder.writable`；canvas 用 `replaceChildren` 挂进宿主。**晚接入门控**：订阅瞬间数据流已在广播，裸 data 包可能抢在 configuration 之前到达——解码管道未配置就收到 data 会抛错并关闭整条流（表现：永久黑屏 + console 刷 "Cannot enqueue into closed stream"）。监听器丢弃 configuration 之前的 data、配置后等首个关键帧再喂（标准 scrcpy 播放器语义）。
 4. 控制回流：`sendMirrorControl`（fire-and-forget `ipcRenderer.send`）→ 主进程 `control()`：渲染层只发归一化坐标，主进程按**当前视频尺寸**换算像素（旋转后尺寸过期也不丢指令），touch 有 clamp01、scroll 有 ±16 钳制、back = injectKeyCode(AndroidBack) Down+Up（beta.2 无 pressBackOrTurnOnScreen）。全部写入 `.catch(()=>undefined)`（断连窗口期不产生 unhandledRejection）。
 
-## 互斥编排（main.ts，幂等设计）
+## GOP 缓存（晚接入观众秒出画）
 
-- **弹出独立窗口** `mirror:start`：先 `await embeddedMirror.stop(serial)`（确定性先停，避免与内嵌面板卸载清理的 stop 时序竞争），再开/聚焦窗口；窗口加载后渲染层自建新会话（弹出过程有 ~1s 重连间隙，与旧 scrcpy.exe 冷启动相当）。
-- **内嵌抢占** `mirror:embedded-start`：先 `closeMirrorWindow(serial)`（删表 → close → 停会话）再 `start`。表先删使窗口 closed handler 跳过二次 stop，顺序完全确定。**例外**：独立窗口挂载时也走这条 IPC 启动自己的会话，按 `BrowserWindow.fromWebContents(event.sender)` 判断——发送方就是该 serial 的独立窗口时跳过关窗（否则窗口会把自己关掉，再留下一个无人观看的孤儿会话）。
-- **窗口关闭**：closed handler 兜底 `embeddedMirror.stop(serial)`——窗口销毁时渲染层 React 清理不会执行，主进程是唯一可靠清理点。`mirror:stop` 与 closed 双路径都幂等。
+设备编码器对 `i-frame-interval` 的服从度参差（实测眼镜 ~2.2s 一个 IDR，某 OPPO 手机静态画面 15s+ 甚至不出）。晚接入观众若只能等线上 IDR，首帧可能十几秒不来。主进程为每个会话缓存**自最近一个关键帧起的数据包**（`session.gop`，上限 300 包 / 8MB，超限或收到新 configuration 即整段重建），resync 时定向重放——新观众拿到完整可解码前缀立即出画，老观众无感。缓存段必须以关键帧开头（重建期内的散帧不进缓存）。
+
+## 互斥编排（main.ts，会话连续设计）
+
+形态切换**不重启会话**：观众来来去去，会话尽量活着（部分设备——如眼镜——编码器被活跃会话占用后立即重启会卡死等首帧，实测 3/3 复现）。
+
+- **弹出独立窗口** `mirror:start`：**不停会话**，开/聚焦窗口；窗口页面挂载后自己走 `mirror:embedded-start`（sender=自己，不会关自己）→ resync + GOP 重放接上，秒出画。内嵌面板随后卸载，其清理 stop 被下述守卫吞掉。
+- **内嵌抢占** `mirror:embedded-start`：`closeMirrorWindowOnly`（删表 → close，**不动会话**）后 `start(serial, sender)` resync 接上。表先删使窗口 closed handler 跳过兜底 stop。**例外**：发送方就是该 serial 的独立窗口时跳过关窗（否则窗口把自己关掉）。
+- **停止宽限期**（EmbeddedMirrorManager）：`stop()` 不立即销毁会话，挂 1.5s 计时器；期内新观众 `start()` 则撤销销毁走 resync，到点无人接才真正停。覆盖抢占/StrictMode 重挂载等毫秒级观众抖动——守卫（`mirrorWindows.has`）只保护长窗口场景（独立窗口页面加载 2-3s），宽限期补上短抖动场景。
+- **窗口关闭**：closed handler 兜底 `embeddedMirror.stop(serial)`（宽限语义）——窗口销毁时渲染层 React 清理不会执行，主进程是唯一可靠清理点。`mirror:stop`（显式停止）与 closed 双路径幂等。
 - 渲染层 `device.mirroring = mirrorWindows.has(serial) || embeddedMirror.isRunning(serial)`。
 
 ## 交互语义（scrcpy 对齐）
@@ -47,15 +54,16 @@
 - start 期间 stop：`stopRequested` Set 登记，start 在 `sessions.set` 前消费；start 中途再 start 会撤销挂起的 stop（dev StrictMode 双挂载靠这个活着）。
 - start 半途失败：catch 关闭 client（防设备端 server 进程残留）+ 清 sessions + starting。
 - 隐藏 Tab `decoder.pause()`：内存有界于一个 GOP（≈10MB），pipeTo 持续消费，队列不涨。
+- 面板 `[decoder, active]` 效果里 resume/pause 需 try/catch：停止投屏的事件回调会同步 dispose 解码器，而效果闭包可能还持着旧实例，对已释放实例 resume 会抛 "Attempt to resume a closed decoder" 并炸掉整棵组件树（无 error boundary，整窗白屏）。
 - 独立窗口 StrictMode 安全性：StrictMode 的 stop 不广播 status:false（`stopRequested` 路径静默），不会误触发自动关窗。
 
 ## 已知边界
 
-- 中途接上的流要等下一个关键帧才出画面（GOP 默认 ~10s）。
 - H.265/AV1 未启用（固定 h264，WebCodecs 能力有但未开选项）。
 - 独立窗口固定 420×780 起始尺寸，视频等比缩放居中（`object-fit` 语义由 max-width/max-height 实现）；不随视频比例自适应窗口大小。
 - 无键盘输入注入（旧 scrcpy.exe 有；内嵌面板本就没有，为保持一致未做）。需要敲字用终端或真机输入法。
-- 弹出/收回瞬间设备侧 server 重启，有 ~1s 黑屏间隙。
+- GOP 缓存超限（300 包/8MB，长时间无 IDR 的高码率动态画面）时降级为等线上关键帧，晚接入首帧变慢但不失败。
+- `videoCodecOptions` 用字符串形式 `"i-frame-interval=2"`（@yume-chan/scrcpy 根入口不导出 CodecOptions 类）；部分设备编码器无视该参数，GOP 缓存兜底。
 
 ## 测试
 

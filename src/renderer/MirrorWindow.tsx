@@ -91,10 +91,25 @@ export function MirrorWindow(): React.ReactElement {
     };
 
     let hasRun = false;
+    // 晚接入观众（本窗口经 resync 接入活跃会话）订阅瞬间数据流已在广播，
+    // 裸 data 包可能抢在 configuration 之前入队：解码管道未配置就收到
+    // data 会报错并关闭整条流（表现为永久黑屏）。这里按 scrcpy 播放器
+    // 语义门控——配置未到丢弃 data，配置后等首个关键帧再喂数据
+    // （i-frame-interval=2，最坏 ~2s 出画）。
+    let configured = false;
+    let awaitingKeyframe = false;
     const unsubscribe = window.androidTool.onMirrorEvent((event) => {
       if (event.serial !== serial) return;
 
       if (event.type === "video") {
+        if (event.kind === "configuration") {
+          configured = true;
+          awaitingKeyframe = true;
+        } else if (event.kind === "data") {
+          if (!configured) return;
+          if (awaitingKeyframe && !event.keyframe) return;
+          awaitingKeyframe = false;
+        }
         packetControllerRef.current?.enqueue({
           type: event.kind,
           data: event.data,
@@ -134,6 +149,7 @@ export function MirrorWindow(): React.ReactElement {
       setDecoder(null);
       packetControllerRef.current?.close();
       packetControllerRef.current = null;
+      configured = false;
       scheduleClose(hasRun ? 0 : 4_000);
     });
 

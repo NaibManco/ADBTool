@@ -1,6 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
+import type { WebContents } from "electron";
 import type { MirrorControlInput, MirrorManagerEvent } from "../shared/types";
 
 // @yume-chan 包是 ESM-only；主进程是 CommonJS 输出。
@@ -30,46 +31,98 @@ type MirrorSession = {
   codec?: number;
   deviceName?: string;
   configuration?: Uint8Array;
+  // 从最近一个关键帧起的数据包缓存：晚接入观众（内嵌↔独立窗口切换、
+  // 面板重开）经 resync 补发后可立即解码出画，不必等设备侧下一个 IDR
+  // （部分设备编码器无视 i-frame-interval，静态画面下 IDR 可能 15s+ 不来）
+  gop?: { packets: VideoPacketCacheEntry[]; bytes: number };
+};
+
+type VideoPacketCacheEntry = {
+  data: Uint8Array;
+  keyframe: boolean;
+  pts: bigint;
 };
 
 export class EmbeddedMirrorManager {
+  // 观众切换（内嵌↔独立窗口抢占、dev StrictMode 重挂载）在停止请求后
+  // 毫秒级就会出现新的 start：留一个宽限期，期内有人接入就不真正停会话，
+  // 避免活跃会话被杀后立即重启（部分设备如眼镜的编码器会卡死等首帧）
+  private static readonly STOP_GRACE_MS = 1_500;
+
+  // GOP 缓存上限：超限（如长时间无 IDR 的高码率画面）则清空等下个关键帧
+  private static readonly GOP_MAX_PACKETS = 300;
+  private static readonly GOP_MAX_BYTES = 8 * 1024 * 1024;
+
   private readonly sessions = new Map<string, MirrorSession>();
   private readonly starting = new Set<string>();
   private readonly stopRequested = new Set<string>();
+  private readonly pendingStops = new Map<string, NodeJS.Timeout>();
   private serverClient?: InstanceType<typeof AdbServerNodeJsClient>;
   private serverBytes?: Promise<Uint8Array>;
 
   constructor(
     private readonly adbExecutable: string,
     private readonly resolveServerPath: () => string,
-    private readonly onEvent: (event: MirrorManagerEvent) => void
+    private readonly onEvent: (
+      event: MirrorManagerEvent,
+      target?: WebContents
+    ) => void
   ) {}
 
   isRunning(serial: string): boolean {
     return this.sessions.has(serial);
   }
 
-  async start(serial: string): Promise<void> {
+  async start(serial: string, target?: WebContents): Promise<void> {
+    // 宽限期内有人接入：撤销挂起的销毁，走下面的 resync 路径接上
+    const pendingStop = this.pendingStops.get(serial);
+    if (pendingStop) {
+      clearTimeout(pendingStop);
+      this.pendingStops.delete(serial);
+    }
+
     const existing = this.sessions.get(serial);
     if (existing) {
-      // 会话已存在（如渲染端刷新后面板重开）：补发缓存信息让新面板接上
+      // 会话已存在（如渲染端刷新后面板重开）：补发缓存信息让新面板接上。
+      // 定向发给请求方——GOP 重放不能广播，否则已有观众的流里会混入重复包
       if (existing.codec !== undefined) {
-        this.onEvent({
-          type: "meta",
-          serial,
-          codec: existing.codec,
-          deviceName: existing.deviceName
-        });
-        if (existing.configuration) {
-          this.onEvent({
-            type: "video",
+        this.onEvent(
+          {
+            type: "meta",
             serial,
-            kind: "configuration",
-            data: existing.configuration
-          });
+            codec: existing.codec,
+            deviceName: existing.deviceName
+          },
+          target
+        );
+        if (existing.configuration) {
+          this.onEvent(
+            {
+              type: "video",
+              serial,
+              kind: "configuration",
+              data: existing.configuration
+            },
+            target
+          );
+        }
+        if (existing.gop?.packets.length) {
+          for (const packet of existing.gop.packets) {
+            this.onEvent(
+              {
+                type: "video",
+                serial,
+                kind: "data",
+                data: packet.data,
+                keyframe: packet.keyframe,
+                pts: packet.pts
+              },
+              target
+            );
+          }
         }
       }
-      this.onEvent({ type: "status", serial, running: true });
+      this.onEvent({ type: "status", serial, running: true }, target);
       return;
     }
     if (this.starting.has(serial)) {
@@ -117,7 +170,10 @@ export class EmbeddedMirrorManager {
         tunnelForward: true,
         videoCodec: "h264",
         videoBitRate: 8_000_000,
-        maxSize: 1600
+        maxSize: 1600,
+        // 关键帧间隔压到 2s（默认 10s）：内嵌↔独立窗口切换时新观众接入
+        // 同一活跃会话，最坏 2s 内拿到 IDR 出画，不用等满一个长 GOP
+        videoCodecOptions: "i-frame-interval=2"
       });
       client = await AdbScrcpyClient.start(
         adb,
@@ -156,6 +212,12 @@ export class EmbeddedMirrorManager {
       this.sessions.set(serial, session);
 
       void client.exited.then(() => {
+        // 会话已没了，挂起的宽限销毁没有意义
+        const pendingStop = this.pendingStops.get(serial);
+        if (pendingStop) {
+          clearTimeout(pendingStop);
+          this.pendingStops.delete(serial);
+        }
         if (this.sessions.get(serial) === session) {
           this.sessions.delete(serial);
           this.onEvent({
@@ -200,6 +262,8 @@ export class EmbeddedMirrorManager {
               });
             } else if (value.type === "configuration") {
               session.configuration = value.data;
+              // 编码参数变了，旧 GOP 不再可解码
+              session.gop = { packets: [], bytes: 0 };
               this.onEvent({
                 type: "video",
                 serial,
@@ -207,6 +271,28 @@ export class EmbeddedMirrorManager {
                 data: value.data
               });
             } else {
+              // 维护 GOP 缓存：关键帧重开一段，普通帧追加，超限整段丢弃
+              // （丢弃后等下个关键帧重建，晚接入观众暂时退化为等 IDR）
+              if (value.keyframe) {
+                session.gop = { packets: [], bytes: 0 };
+              }
+              const gop = (session.gop ??= { packets: [], bytes: 0 });
+              // 缓存段必须以关键帧开头：重建期内的散帧无处挂靠，不进缓存
+              if (
+                (value.keyframe || gop.packets.length > 0) &&
+                gop.packets.length < EmbeddedMirrorManager.GOP_MAX_PACKETS &&
+                gop.bytes + value.data.byteLength <=
+                  EmbeddedMirrorManager.GOP_MAX_BYTES
+              ) {
+                gop.packets.push({
+                  data: value.data,
+                  keyframe: value.keyframe ?? false,
+                  pts: value.pts ?? 0n
+                });
+                gop.bytes += value.data.byteLength;
+              } else {
+                session.gop = { packets: [], bytes: 0 };
+              }
               this.onEvent({
                 type: "video",
                 serial,
@@ -257,7 +343,29 @@ export class EmbeddedMirrorManager {
       }
       return false;
     }
+    // 不是最后一个停止路径说了算：先挂宽限计时器，期内新观众接入则作废
+    if (!this.pendingStops.has(serial)) {
+      this.pendingStops.set(
+        serial,
+        setTimeout(() => {
+          this.pendingStops.delete(serial);
+          void this.stopNow(serial);
+        }, EmbeddedMirrorManager.STOP_GRACE_MS)
+      );
+    }
+    return true;
+  }
+
+  /** 立即销毁会话（宽限期到点 / 退出清理路径专用）。 */
+  private async stopNow(serial: string): Promise<void> {
+    const session = this.sessions.get(serial);
+    if (!session) return;
     this.sessions.delete(serial);
+    const pendingStop = this.pendingStops.get(serial);
+    if (pendingStop) {
+      clearTimeout(pendingStop);
+      this.pendingStops.delete(serial);
+    }
     await session.client.close().catch(() => undefined);
     this.onEvent({
       type: "status",
@@ -265,12 +373,16 @@ export class EmbeddedMirrorManager {
       running: false,
       message: "已停止投屏"
     });
-    return true;
   }
 
   async stopAll(): Promise<void> {
+    for (const serial of [...this.pendingStops.keys()]) {
+      const timer = this.pendingStops.get(serial);
+      clearTimeout(timer);
+      this.pendingStops.delete(serial);
+    }
     for (const serial of [...this.sessions.keys()]) {
-      await this.stop(serial);
+      await this.stopNow(serial);
     }
   }
 

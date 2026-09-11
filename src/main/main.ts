@@ -95,7 +95,15 @@ const embeddedMirror = new EmbeddedMirrorManager(
   resolveAdbPath(),
   // 惰性解析：server 文件缺失只禁用内嵌投屏，不影响应用启动
   () => resolveScrcpyServerPath(),
-  (event) => {
+  (event, target) => {
+    // 定向（resync 补发/GOP 重放只给请求方，避免污染其他观众的流）；
+    // 广播（会话的实时事件所有窗口都可能关注）
+    if (target) {
+      if (!target.isDestroyed()) {
+        target.send("mirror:event", event);
+      }
+      return;
+    }
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) {
         window.webContents.send("mirror:event", event);
@@ -504,14 +512,19 @@ async function createMirrorWindow(
   return window;
 }
 
-/** 关闭指定设备的独立投屏窗口并停掉其会话（幂等，供各停止路径复用）。 */
-async function closeMirrorWindow(serial: string): Promise<void> {
+/** 关闭指定设备的独立投屏窗口（不动会话；会话由新观众接入或各停止路径收尾）。 */
+function closeMirrorWindowOnly(serial: string): void {
   const existing = mirrorWindows.get(serial);
   if (!existing) return;
   mirrorWindows.delete(serial);
   if (!existing.isDestroyed()) {
     existing.close();
   }
+}
+
+/** 关闭指定设备的独立投屏窗口并停掉其会话（幂等，供各停止路径复用）。 */
+async function closeMirrorWindow(serial: string): Promise<void> {
+  closeMirrorWindowOnly(serial);
   await embeddedMirror.stop(serial);
 }
 
@@ -839,9 +852,10 @@ function registerIpc(): void {
     async (_event, serial: string, label: string): Promise<ActionResult> => {
       try {
         assertSerial(serial);
-        // 弹出独立窗口：同设备的内嵌会话让位。这里确定性先停，
-        // 避免与内嵌面板卸载清理的 stop 时序竞争；窗口加载后自建新会话
-        await embeddedMirror.stop(serial);
+        // 弹出独立窗口：会话保持运行，窗口作为新观众经 resync 接入。
+        // 不重启会话——部分设备（眼镜）编码器被活跃会话占用后立即重启
+        // 会卡死等首帧；窗体内的面板卸载 stop 由 mirror:embedded-stop
+        // 的"窗口已接管"守卫吞掉
         const safeLabel =
           typeof label === "string" && label.trim()
             ? label.trim().slice(0, 80)
@@ -903,13 +917,15 @@ function registerIpc(): void {
     async (event, serial: string): Promise<ActionResult> => {
       try {
         assertSerial(serial);
-        // 同设备内嵌与独立窗口互斥：先关独立窗口并停其会话，再建内嵌会话。
-        // 例外：独立窗口挂载时也走这里启动自己的会话，发送方就是它，不能关自己
+        // 同设备内嵌与独立窗口互斥：关独立窗口（会话不动），内嵌面板经
+        // resync 接入同一会话。例外：独立窗口挂载时也走这里启动自己的
+        // 会话，发送方就是它，不能关自己
         const sender = BrowserWindow.fromWebContents(event.sender);
         if (mirrorWindows.get(serial) !== sender) {
-          await closeMirrorWindow(serial);
+          closeMirrorWindowOnly(serial);
         }
-        await embeddedMirror.start(serial);
+        // 把请求方带下去：resync 的 meta/配置/GOP 重放定向发给它
+        await embeddedMirror.start(serial, event.sender);
         return { ok: true };
       } catch (error) {
         return resultFromError(error);
@@ -922,6 +938,10 @@ function registerIpc(): void {
     async (_event, serial: string): Promise<ActionResult> => {
       try {
         assertSerial(serial);
+        // 弹出瞬间旧内嵌面板卸载会走到这里：会话已移交独立窗口，不能停
+        if (mirrorWindows.has(serial)) {
+          return { ok: true };
+        }
         const stopped = await embeddedMirror.stop(serial);
         return {
           ok: stopped,

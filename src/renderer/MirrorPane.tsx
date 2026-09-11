@@ -90,10 +90,23 @@ export function MirrorPane({
       }
     });
 
+    // 晚接入观众（页面刷新后面板重开，经 resync 接入活跃会话）可能拿到
+    // 先于 configuration 的裸 data 包：解码管道未配置就收到 data 会报错
+    // 并关闭整条流（黑屏）。配置未到丢弃 data，配置后等首个关键帧再喂。
+    let configured = false;
+    let awaitingKeyframe = false;
     const unsubscribe = window.androidTool.onMirrorEvent((event) => {
       if (event.serial !== device.serial) return;
 
       if (event.type === "video") {
+        if (event.kind === "configuration") {
+          configured = true;
+          awaitingKeyframe = true;
+        } else if (event.kind === "data") {
+          if (!configured) return;
+          if (awaitingKeyframe && !event.keyframe) return;
+          awaitingKeyframe = false;
+        }
         packetControllerRef.current?.enqueue({
           type: event.kind,
           data: event.data,
@@ -129,6 +142,7 @@ export function MirrorPane({
         setDecoder(null);
         packetControllerRef.current?.close();
         packetControllerRef.current = null;
+        configured = false;
       }
     });
 
@@ -158,10 +172,21 @@ export function MirrorPane({
       host.replaceChildren(canvas);
     }
     if (!decoder) return;
+    // 停止投屏的事件回调会同步 dispose 解码器，而这里的闭包可能还持着
+    // 旧实例（状态更新尚未重跑本效果）；对已释放实例 resume/pause 会抛
+    // "Attempt to resume/pause a closed decoder" 并炸掉整棵组件树
     if (active) {
-      decoder.resume();
+      try {
+        decoder.resume();
+      } catch {
+        // 已释放，忽略
+      }
     } else {
-      decoder.pause();
+      try {
+        decoder.pause();
+      } catch {
+        // 已释放，忽略
+      }
     }
   }, [decoder, active]);
 

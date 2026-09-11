@@ -830,12 +830,13 @@ export function App() {
   async function run(
     serial: string,
     operation: () => Promise<ActionResult>
-  ): Promise<void> {
+  ): Promise<ActionResult> {
     setBusySerial(serial);
     try {
       const result = await operation();
       setError(result.ok ? undefined : result.message || "操作失败");
       await refresh();
+      return result;
     } finally {
       setBusySerial(undefined);
     }
@@ -904,7 +905,9 @@ export function App() {
       });
   }
 
-  // 弹出窗口 = 换用独立大屏窗口（主进程 yume-chan 会话），同时自动关闭内嵌投屏
+  // 弹出窗口 = 换用独立大屏窗口（主进程 yume-chan 会话），同时自动关闭内嵌投屏。
+  // 先弹窗再撤面板：面板卸载发出的停会话请求必然落在窗口注册之后，
+  // 被主进程"窗口已接管"守卫吞掉，会话在两种形态间保持连续
   async function toggleMirrorWindow(device: AndroidDevice): Promise<void> {
     if (device.mirroring && !device.mirroringEmbedded) {
       await run(device.serial, () =>
@@ -912,10 +915,12 @@ export function App() {
       );
       return;
     }
-    closeMirror(device.serial);
-    await run(device.serial, () =>
+    const result = await run(device.serial, () =>
       window.androidTool.startMirror(device.serial, deviceName(device))
     );
+    if (result?.ok !== false) {
+      closeMirror(device.serial);
+    }
   }
 
   function changeWorkspaceView(view: WorkspaceView): void {
