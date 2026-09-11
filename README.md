@@ -6,7 +6,7 @@
 
 - **多设备发现**与状态展示（USB/无线，序列号隔离）
 - **无线调试**：USB 一键转无线（`tcpip 5555` + 自动取 Wi-Fi IP），或 Android 11+ 配对码配对/连接，失败中文归因
-- **投屏**：内嵌到主工作区的视频流投屏（WebCodecs 硬解，画布触摸/滚轮/右键=返回），或弹出独立 scrcpy 窗口
+- **投屏**：内嵌到主工作区的视频流投屏（WebCodecs 硬解，画布触摸/滚轮/右键=返回），可弹出独立大屏窗口
 - **Logcat**：Android Studio 风格查询语法（`tag:`/`message:`/`pid:`/`level:`/`package:`、`~` 正则、`-` 取反、引号短语）、缓冲区切换（main/system/crash/radio/events）、导出/复制、跟随滚动、查询历史、`FATAL EXCEPTION` 崩溃角标与一键复制堆栈
 - **终端**：每设备交互式 adb shell（持久会话、输入历史、Ctrl+C）
 - **截图/录屏**：自动复制剪贴板、预览浮层、另存为
@@ -27,11 +27,11 @@
 `vendor/` 不入库（第三方二进制），需自行放置：
 
 ```
-vendor\scrcpy\   ← adb.exe、scrcpy.exe、scrcpy-server、AdbWinApi.dll、AdbWinUsbApi.dll（scrcpy 4.0 发行包）
+vendor\scrcpy\   ← adb.exe、scrcpy-server、AdbWinApi.dll、AdbWinUsbApi.dll（取自 scrcpy 4.0 发行包，其余文件不随包分发）
 vendor\jadx\     ← jadx 1.5.6 发行包（bin\ + lib\jadx-1.5.6-all.jar）
 ```
 
-也可不放置：应用会按 `ADB_PATH`/`SCRCPY_PATH`/`JADX_PATH`/`JAVA_HOME` 环境变量与本机常见安装路径解析（见 `src/main/paths.ts`）。
+也可不放置：应用会按 `ADB_PATH`/`JADX_PATH`/`JAVA_HOME` 环境变量与本机常见安装路径解析（见 `src/main/paths.ts`）。
 
 ## 开发
 

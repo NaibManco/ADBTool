@@ -24,20 +24,6 @@ export function buildAdbCandidates(
   ].filter((candidate): candidate is string => Boolean(candidate));
 }
 
-export function buildScrcpyCandidates(
-  resourcesPath: string | undefined,
-  environment: NodeJS.ProcessEnv
-): string[] {
-  return [
-    environment.SCRCPY_PATH,
-    resourcesPath
-      ? path.join(resourcesPath, "scrcpy", "scrcpy.exe")
-      : undefined,
-    "D:\\scrcpy-win64-v4.0\\scrcpy.exe",
-    "C:\\Program Files\\scrcpy\\scrcpy.exe"
-  ].filter((candidate): candidate is string => Boolean(candidate));
-}
-
 export function buildScrcpyServerCandidates(
   resourcesPath: string | undefined,
   environment: NodeJS.ProcessEnv
@@ -87,13 +73,6 @@ function electronResourcesPath(): string | undefined {
 export function resolveAdbPath(): string {
   return (
     firstExisting(buildAdbCandidates(electronResourcesPath(), process.env)) ?? "adb"
-  );
-}
-
-export function resolveScrcpyPath(): string {
-  return (
-    firstExisting(buildScrcpyCandidates(electronResourcesPath(), process.env)) ??
-    "scrcpy"
   );
 }
 

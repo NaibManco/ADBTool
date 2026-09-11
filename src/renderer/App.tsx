@@ -904,7 +904,7 @@ export function App() {
       });
   }
 
-  // 弹出窗口 = 换用外部 scrcpy 大屏，同时自动关闭内嵌投屏
+  // 弹出窗口 = 换用独立大屏窗口（主进程 yume-chan 会话），同时自动关闭内嵌投屏
   async function toggleMirrorWindow(device: AndroidDevice): Promise<void> {
     if (device.mirroring && !device.mirroringEmbedded) {
       await run(device.serial, () =>

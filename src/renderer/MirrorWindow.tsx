@@ -4,10 +4,8 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent
 } from "react";
-import { ArrowSquareOut } from "@phosphor-icons/react";
 import { WebCodecsVideoDecoder } from "@yume-chan/scrcpy-decoder-webcodecs";
 import type { ScrcpyVideoCodecId } from "@yume-chan/scrcpy";
-import type { AndroidDevice } from "../shared/types";
 import { normalizedPoint, wheelToScroll } from "./mirror-control";
 
 type MirrorDecoder = InstanceType<typeof WebCodecsVideoDecoder>;
@@ -32,34 +30,27 @@ type VideoPacket = {
   isClientResize?: boolean;
 };
 
-function deviceLabel(device: AndroidDevice): string {
-  return device.model?.replaceAll("_", " ") || device.product || device.serial;
-}
-
-export function MirrorPane({
-  device,
-  active,
-  onMirrorWindow,
-  onClose
-}: {
-  device: AndroidDevice;
-  active: boolean;
-  onMirrorWindow: () => Promise<void>;
-  onClose: () => void;
-}) {
+// 独立投屏窗口：与内嵌 MirrorPane 共用主进程的 yume-chan 会话（事件广播到全部窗口），
+// 这里只负责解码显示与控制输入，无面板装饰。
+// 会话结束（设备断开等）自动关窗，对齐旧 scrcpy.exe 的行为。
+export function MirrorWindow(): React.ReactElement {
+  const params = new URLSearchParams(window.location.search);
+  const serial = params.get("serial") ?? "";
+  const label = params.get("label") ?? serial;
   const [status, setStatus] = useState("正在连接…");
-  const [running, setRunning] = useState(false);
   const [decoder, setDecoder] = useState<MirrorDecoder | null>(null);
-  const externalWindow =
-    device.mirroring && !device.mirroringEmbedded;
   const hostRef = useRef<HTMLDivElement>(null);
   const decoderRef = useRef<MirrorDecoder | null>(null);
   const packetControllerRef =
     useRef<ReadableStreamDefaultController<VideoPacket> | null>(null);
 
   useEffect(() => {
+    if (!serial) {
+      setStatus("缺少设备序列号参数");
+      return;
+    }
     if (!WebCodecsVideoDecoder.isSupported) {
-      setStatus("当前环境不支持 WebCodecs 视频解码，无法内嵌投屏");
+      setStatus("当前环境不支持 WebCodecs 视频解码");
       return;
     }
 
@@ -74,7 +65,7 @@ export function MirrorPane({
         event.clientX,
         event.clientY
       );
-      window.androidTool.sendMirrorControl(device.serial, {
+      window.androidTool.sendMirrorControl(serial, {
         type: "scroll",
         x: point.x,
         y: point.y,
@@ -90,8 +81,18 @@ export function MirrorPane({
       }
     });
 
+    let closeTimer = 0;
+    const scheduleClose = (delay = 0): void => {
+      if (closeTimer) return;
+      closeTimer = window.setTimeout(() => {
+        closeTimer = 0;
+        void window.androidTool.stopMirror(serial);
+      }, delay);
+    };
+
+    let hasRun = false;
     const unsubscribe = window.androidTool.onMirrorEvent((event) => {
-      if (event.serial !== device.serial) return;
+      if (event.serial !== serial) return;
 
       if (event.type === "video") {
         packetControllerRef.current?.enqueue({
@@ -121,35 +122,43 @@ export function MirrorPane({
         return;
       }
 
-      setRunning(event.running);
-      if (event.message) setStatus(event.message);
-      if (!event.running) {
-        decoderRef.current?.dispose();
-        decoderRef.current = null;
-        setDecoder(null);
-        packetControllerRef.current?.close();
-        packetControllerRef.current = null;
+      if (event.running) {
+        hasRun = true;
+        return;
       }
+      if (event.message) setStatus(event.message);
+      // 会话结束：运行过就直接关窗（设备断开对齐旧 scrcpy 行为）；
+      // 从未运行说明是启动失败，留 4 秒展示错误再自动关闭
+      decoderRef.current?.dispose();
+      decoderRef.current = null;
+      setDecoder(null);
+      packetControllerRef.current?.close();
+      packetControllerRef.current = null;
+      scheduleClose(hasRun ? 0 : 4_000);
     });
 
     void window.androidTool
-      .startEmbeddedMirror(device.serial)
+      .startEmbeddedMirror(serial)
       .then((result) => {
-        if (!result.ok) setStatus(result.message || "内嵌投屏启动失败");
+        if (!result.ok) {
+          setStatus(result.message || "投屏启动失败");
+          scheduleClose(4_000);
+        }
       });
 
     return () => {
       host?.removeEventListener("wheel", handleWheel);
       unsubscribe();
-      void window.androidTool.stopEmbeddedMirror(device.serial);
+      window.clearTimeout(closeTimer);
+      void window.androidTool.stopEmbeddedMirror(serial);
       decoderRef.current?.dispose();
       decoderRef.current = null;
       packetControllerRef.current?.close();
       packetControllerRef.current = null;
     };
-  }, [device.serial]);
+  }, [serial]);
 
-  // 挂载/切换可见性时把解码画布放进宿主，并按激活状态暂停/恢复解码
+  // 挂载后把解码画布放进宿主
   useEffect(() => {
     const host = hostRef.current;
     const canvas = canvasOf(decoder);
@@ -157,13 +166,12 @@ export function MirrorPane({
       canvas.className = "mirror-canvas";
       host.replaceChildren(canvas);
     }
-    if (!decoder) return;
-    if (active) {
-      decoder.resume();
-    } else {
-      decoder.pause();
-    }
-  }, [decoder, active]);
+  }, [decoder]);
+
+  // 页面 document.title 会覆盖 BrowserWindow 的 title 选项，这里补上设备标识
+  useEffect(() => {
+    document.title = `Android Dev Tool - ${label} [${serial}]`;
+  }, [label, serial]);
 
   function sendTouch(
     action: "down" | "move" | "up",
@@ -176,7 +184,7 @@ export function MirrorPane({
       event.clientX,
       event.clientY
     );
-    window.androidTool.sendMirrorControl(device.serial, {
+    window.androidTool.sendMirrorControl(serial, {
       type: "touch",
       action,
       pointerId: event.pointerId,
@@ -186,28 +194,9 @@ export function MirrorPane({
   }
 
   return (
-    <section className={active ? "mirror-pane" : "mirror-pane pane-hidden"}>
-      <header className="mirror-header">
-        <div>
-          <strong>{deviceLabel(device)}</strong>
-          <code>{device.serial}</code>
-        </div>
-        <span className={running ? "mirror-state on" : "mirror-state"}>
-          {status}
-        </span>
-        <button
-          className={externalWindow ? "mirror-popout on" : "mirror-popout"}
-          onClick={() => void onMirrorWindow()}
-          title={externalWindow ? "关闭外部投屏窗口" : "弹出独立投屏窗口"}
-        >
-          <ArrowSquareOut size={14} />
-        </button>
-        <button className="mirror-close" onClick={onClose} title="关闭投屏">
-          ×
-        </button>
-      </header>
+    <main className="mirror-window">
       <div
-        className="mirror-host"
+        className="mirror-window-host"
         ref={hostRef}
         onPointerDown={(event) => {
           // 仅左键映射为触摸；右键留给"返回"，中键/侧键忽略
@@ -229,7 +218,7 @@ export function MirrorPane({
         }}
         onContextMenu={(event) => {
           event.preventDefault();
-          window.androidTool.sendMirrorControl(device.serial, { type: "back" });
+          window.androidTool.sendMirrorControl(serial, { type: "back" });
         }}
       >
         {!decoder && (
@@ -239,6 +228,6 @@ export function MirrorPane({
           </div>
         )}
       </div>
-    </section>
+    </main>
   );
 }

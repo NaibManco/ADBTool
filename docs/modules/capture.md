@@ -14,7 +14,7 @@
 2. **scrcpy 兼容链路**（`screen-recorder.ts` 的 `ScreenRecorder`，永不受设备 screenrecord 策略影响）：@yume-chan 隐藏视频会话（`video:true, audio:false, control:false`，h264/8Mbps，与内嵌投屏同 server 独立连接、可与投屏并存）→ `session` 包取宽高、`configuration` 包经 `@yume-chan/media-codec` 解 SPS/PPS → avcC；`data` 包起始码转长度前缀喂 `mp4-muxer`（StreamTarget 流式写盘、`fastStart:false`、`firstTimestampBehavior:'offset'`，时长用相邻 pts 差）。停止正常收尾写 moov，**无时长限制**。
 3. 回退发生时开始消息会注明"设备限制 screenrecord，已用兼容链路"。两条链路停止/list 逻辑在 main.ts handler 按 `isRecording` 分派，统一写 `captureMedia`。
 
-已知边界：`scrcpy.exe`（外部投屏）在本机曾因 SDL 段错误不可用，与录屏无关（录屏不经过 scrcpy.exe）。
+录屏全程不依赖 scrcpy.exe（该二进制已随外置投屏迁移一并移除，见 [投屏](mirror.md)）。
 
 ## 截图
 

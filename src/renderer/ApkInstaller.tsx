@@ -225,7 +225,10 @@ export function ApkInstaller({
     if (!apk) return;
     // 拖入的文件不经过主进程，缺包名时补读一次，供安装后启动使用
     if (launchAfterInstall && !apk.packageName) {
-      apk = await window.androidTool.resolveApkPath(apk.path).catch(() => apk);
+      const resolved = await window.androidTool
+        .resolveApkPath(apk.path)
+        .catch(() => undefined);
+      apk = resolved ?? apk;
     }
     setInstallState("installing");
     setInstallFailure(undefined);

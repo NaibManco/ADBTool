@@ -6012,6 +6012,32 @@ footer b {
   font-size: 11px;
 }
 
+/* 独立投屏窗口（?view=mirror）：无装饰全屏宿主，视频等比缩放居中 */
+.mirror-window {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #05090d;
+}
+
+.mirror-window-host {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.mirror-window-host .mirror-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  cursor: pointer;
+}
+
 :root[data-theme="light"] .mirror-popout {
   color: #7d9099;
 }

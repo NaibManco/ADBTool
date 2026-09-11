@@ -56,7 +56,10 @@
         "from": "vendor/scrcpy",
         "to": "scrcpy",
         "filter": [
-          "**/*"
+          "adb.exe",
+          "AdbWinApi.dll",
+          "AdbWinUsbApi.dll",
+          "scrcpy-server"
         ]
       },
       {

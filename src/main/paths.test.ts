@@ -3,32 +3,24 @@ import { describe, expect, it } from "vitest";
 import {
   buildAdbCandidates,
   buildJadxCandidates,
-  buildJavaCandidates,
-  buildScrcpyCandidates
+  buildJavaCandidates
 } from "./paths";
 
 describe("packaged executable paths", () => {
-  it("prefers ADB and scrcpy bundled under Electron resources", () => {
+  it("prefers ADB bundled under Electron resources", () => {
     const resourcesPath = "C:\\Temp\\Android Dev Tool\\resources";
 
     expect(buildAdbCandidates(resourcesPath, {} as NodeJS.ProcessEnv)[0]).toBe(
       path.join(resourcesPath, "scrcpy", "adb.exe")
     );
-    expect(buildScrcpyCandidates(resourcesPath, {} as NodeJS.ProcessEnv)[0]).toBe(
-      path.join(resourcesPath, "scrcpy", "scrcpy.exe")
-    );
   });
 
   it("keeps explicit environment overrides ahead of development fallbacks", () => {
     const environment = {
-      ADB_PATH: "C:\\custom\\adb.exe",
-      SCRCPY_PATH: "C:\\custom\\scrcpy.exe"
+      ADB_PATH: "C:\\custom\\adb.exe"
     } as NodeJS.ProcessEnv;
 
     expect(buildAdbCandidates(undefined, environment)[0]).toBe(environment.ADB_PATH);
-    expect(buildScrcpyCandidates(undefined, environment)[0]).toBe(
-      environment.SCRCPY_PATH
-    );
   });
 
   it("resolves jadx from bundled resources first and honors JADX_PATH", () => {

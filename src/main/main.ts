@@ -46,10 +46,8 @@ import {
   resolveAdbPath,
   resolveJadxJarPath,
   resolveJavaExecutable,
-  resolveScrcpyPath,
   resolveScrcpyServerPath
 } from "./paths";
-import { ScrcpyManager } from "./scrcpy-manager";
 import { SettingsStore } from "./settings";
 import { getLogcatWindowPosition } from "./window-placement";
 import { CaptureManager } from "./capture-manager";
@@ -77,11 +75,12 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | undefined;
 let logcatWindow: BrowserWindow | undefined;
 const managerWindows = new Map<ManagerView, BrowserWindow>();
+// 独立投屏窗口（yume-chan 会话渲染到独立 BrowserWindow，替代外部 scrcpy.exe）
+const mirrorWindows = new Map<string, BrowserWindow>();
 let settings: SettingsStore;
 let captureMedia: CaptureMediaStore;
 const logcatDevices = new Map<string, AndroidDevice>();
 const adb = new AdbClient(resolveAdbPath());
-const scrcpy = new ScrcpyManager(resolveScrcpyPath());
 const capture = new CaptureManager(resolveAdbPath());
 const deviceFiles = new DeviceFileManager(resolveAdbPath());
 const deviceInfo = new DeviceInfoCollector(resolveAdbPath());
@@ -382,15 +381,19 @@ function registerCaptureMediaProtocol(): void {
 
 async function loadRenderer(
   window: BrowserWindow,
-  view?: string
+  view?: string,
+  query?: Record<string, string>
 ): Promise<void> {
   if (process.env.VITE_DEV_SERVER_URL) {
     const url = new URL(process.env.VITE_DEV_SERVER_URL);
     if (view) url.searchParams.set("view", view);
+    for (const [key, value] of Object.entries(query ?? {})) {
+      url.searchParams.set(key, value);
+    }
     await window.loadURL(url.toString());
   } else {
     await window.loadFile(path.join(__dirname, "../../renderer/index.html"), {
-      query: view ? { view } : undefined
+      query: view ? { view, ...query } : query
     });
   }
 }
@@ -467,6 +470,51 @@ async function createManagerWindow(view: ManagerView): Promise<BrowserWindow> {
   return window;
 }
 
+// 独立投屏窗口：yume-chan 会话的视频流渲染到独立 BrowserWindow，
+// 取代外部 scrcpy.exe（其 SDL 显示层在部分机器上必然段错误）。
+async function createMirrorWindow(
+  serial: string,
+  label: string
+): Promise<BrowserWindow> {
+  const window = new BrowserWindow({
+    width: 420,
+    height: 780,
+    minWidth: 240,
+    minHeight: 360,
+    backgroundColor: "#05090d",
+    title: `Android Dev Tool - ${label} [${serial}]`,
+    webPreferences: {
+      preload: path.join(__dirname, "../preload/index.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  mirrorWindows.set(serial, window);
+  window.removeMenu();
+  // 窗口被关闭（含 × 与 mirror:stop）时确保设备侧会话被回收；
+  // 窗口销毁时渲染层的 React 清理不会执行，主进程是唯一可靠的清理点
+  window.on("closed", () => {
+    if (mirrorWindows.get(serial) === window) {
+      mirrorWindows.delete(serial);
+      void embeddedMirror.stop(serial);
+    }
+  });
+  await loadRenderer(window, "mirror", { serial, label });
+  return window;
+}
+
+/** 关闭指定设备的独立投屏窗口并停掉其会话（幂等，供各停止路径复用）。 */
+async function closeMirrorWindow(serial: string): Promise<void> {
+  const existing = mirrorWindows.get(serial);
+  if (!existing) return;
+  mirrorWindows.delete(serial);
+  if (!existing.isDestroyed()) {
+    existing.close();
+  }
+  await embeddedMirror.stop(serial);
+}
+
 function registerIpc(): void {
   ipcMain.handle("settings:theme-get", () => settings.getTheme());
 
@@ -525,7 +573,7 @@ function registerIpc(): void {
     return devices.map((device) => ({
       ...device,
       mirroring:
-        scrcpy.isRunning(device.serial) ||
+        mirrorWindows.has(device.serial) ||
         embeddedMirror.isRunning(device.serial),
       mirroringEmbedded: embeddedMirror.isRunning(device.serial)
     }));
@@ -791,11 +839,22 @@ function registerIpc(): void {
     async (_event, serial: string, label: string): Promise<ActionResult> => {
       try {
         assertSerial(serial);
-        const started = scrcpy.start(serial, label);
-        return {
-          ok: started,
-          message: started ? undefined : "该设备已经在投屏"
-        };
+        // 弹出独立窗口：同设备的内嵌会话让位。这里确定性先停，
+        // 避免与内嵌面板卸载清理的 stop 时序竞争；窗口加载后自建新会话
+        await embeddedMirror.stop(serial);
+        const safeLabel =
+          typeof label === "string" && label.trim()
+            ? label.trim().slice(0, 80)
+            : serial;
+        const existing = mirrorWindows.get(serial);
+        if (existing && !existing.isDestroyed()) {
+          if (existing.isMinimized()) existing.restore();
+          existing.show();
+          existing.focus();
+          return { ok: true };
+        }
+        await createMirrorWindow(serial, safeLabel);
+        return { ok: true };
       } catch (error) {
         return resultFromError(error);
       }
@@ -807,11 +866,8 @@ function registerIpc(): void {
     async (_event, serial: string): Promise<ActionResult> => {
       try {
         assertSerial(serial);
-        const stopped = scrcpy.stop(serial);
-        return {
-          ok: stopped,
-          message: stopped ? undefined : "该设备当前没有投屏"
-        };
+        await closeMirrorWindow(serial);
+        return { ok: true };
       } catch (error) {
         return resultFromError(error);
       }
@@ -844,9 +900,15 @@ function registerIpc(): void {
 
   ipcMain.handle(
     "mirror:embedded-start",
-    async (_event, serial: string): Promise<ActionResult> => {
+    async (event, serial: string): Promise<ActionResult> => {
       try {
         assertSerial(serial);
+        // 同设备内嵌与独立窗口互斥：先关独立窗口并停其会话，再建内嵌会话。
+        // 例外：独立窗口挂载时也走这里启动自己的会话，发送方就是它，不能关自己
+        const sender = BrowserWindow.fromWebContents(event.sender);
+        if (mirrorWindows.get(serial) !== sender) {
+          await closeMirrorWindow(serial);
+        }
         await embeddedMirror.start(serial);
         return { ok: true };
       } catch (error) {
@@ -1516,7 +1578,6 @@ app.on("before-quit", () => {
 });
 
 app.on("window-all-closed", () => {
-  scrcpy.stopAll();
   void embeddedMirror.stopAll();
   logcat.stopAll();
   terminal.stopAll();

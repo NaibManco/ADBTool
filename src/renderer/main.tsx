@@ -4,6 +4,7 @@ import { App } from "./App";
 import { LogcatWindow } from "./LogcatWindow";
 import { ManagerWindow } from "./ManagerWindow";
 import { DecompilerWindow } from "./DecompilerWindow";
+import { MirrorWindow } from "./MirrorWindow";
 import "./styles.css";
 
 const view = new URLSearchParams(window.location.search).get("view");
@@ -11,6 +12,7 @@ const view = new URLSearchParams(window.location.search).get("view");
 function renderView() {
   if (view === "logcat") return <LogcatWindow />;
   if (view === "decompiler") return <DecompilerWindow />;
+  if (view === "mirror") return <MirrorWindow />;
   if (view === "apps" || view === "files" || view === "device-info") {
     return <ManagerWindow view={view} />;
   }
