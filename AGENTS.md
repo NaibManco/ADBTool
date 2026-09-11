@@ -31,7 +31,8 @@
 D:\MyTool
 ├─ src\main\                 Electron 主进程与本机能力
 │  ├─ main.ts                窗口、IPC、对话框和应用生命周期入口
-│  ├─ adb.ts                 ADB 命令构造与设备操作
+│  ├─ adb.ts                 ADB 命令构造与设备操作（含无线 pair/connect/tcpip）
+│  ├─ apk-manifest.ts        APK 包名离线识别（zip + 二进制 AXML 解析）
 │  ├─ scrcpy-manager.ts      多设备外部 scrcpy 窗口进程管理
 │  ├─ embedded-mirror-manager.ts  内嵌投屏：@yume-chan(scrcpy 4.0) 视频流会话与控制注入
 │  ├─ terminal-manager.ts    多设备交互式 adb shell 会话
@@ -79,16 +80,18 @@ docs\modules\
 ## 当前主要功能
 
 - 多设备发现、刷新和在线状态展示。
+- 无线调试连接：设备栏「无线」入口（空设备状态也可直达）。USB 一键转无线（读设备 Wi-Fi IP → `adb tcpip 5555` → `connect`，wlan 接口优先）；Android 11+ 无线调试配对码流程（`adb pair` 一次 + `adb connect`）。失败中文归因（端口未开放/配对码过期/网络不通等）。
 - 两种投屏形态：「启动投屏」内嵌到主窗口右侧工作区（@yume-chan 3.0.0-beta.2 + 内置 scrcpy-server 4.0，WebCodecs 硬解，画布支持点击/拖动/滚轮、右键=返回）；投屏面板头部的「弹出」切换到外部 scrcpy 独立窗口，弹出时自动关闭内嵌投屏。
 - 右侧工作区在「投屏」「日志」「终端」整页视图间切换，切换钮仅在有多个内容时显示（切走的会话保活），偏好持久化在 localStorage；截图/录屏预览以浮层覆盖，不中断底层会话。
 - Logcat 查询语法过滤（tag:/message:/pid:/tid:/level:/package:、~ 正则、- 取反、引号短语，对齐 Android Studio）、缓冲区切换（main/system/crash/radio/events）、导出/复制、渲染窗口与跟随滚动、查询历史。
+- Logcat 崩溃自动提示：流中出现 `FATAL EXCEPTION` 时工具栏红色角标计数，一键复制最近一次崩溃的完整堆栈；清空显示时提醒同步消失。
 - 每设备交互式 Shell 终端（`adb -s <serial> shell` 持久会话）：从设备卡打开即针对该设备，输出实时流（ANSI 清理），输入行带本地历史（↑↓）与 Ctrl+C 发送；vi/top 等全屏交互程序不支持。
 - 剪贴板双向同步（按设备开关，设备卡头部图标）：设备复制自动到电脑、电脑复制自动到设备，防回环；基于隐藏 scrcpy 会话，不依赖投屏。
 - Back、Home、最近任务、电源和重启等设备操作。
 - scrcpy 启动参数必须保留 `--no-audio`，避免电脑接管设备音频输出。
 - 应用进程过滤会展示包名/进程列表，由用户选择，不要擅自只取第一个前台进程。
-- APK 安装支持文件选择、拖入文件和输入本机 APK 绝对路径，三种入口共用主进程文件校验及同一安装链路。安装失败时解析 adb 输出并展示中文原因（保留原始错误）；检测到降级安装（`INSTALL_FAILED_VERSION_DOWNGRADE`）时提供"强制降级安装"选择，确认后带 `-d` 重试。
-- 应用管理独立窗口：应用信息、停止运行、清除数据和卸载。
+- APK 安装支持文件选择、拖入文件和输入本机 APK 绝对路径，三种入口共用主进程文件校验及同一安装链路。安装失败时解析 adb 输出并展示中文原因（保留原始错误）；检测到降级安装（`INSTALL_FAILED_VERSION_DOWNGRADE`）时提供"强制降级安装"选择，确认后带 `-d` 重试。可选「安装成功后启动应用」：离线解析 APK 包名（`apk-manifest.ts`，识别失败不自动启动并提示）。
+- 应用管理独立窗口：应用信息、启动应用（monkey 拉起入口 Activity，无需 Activity 名）、停止运行、清除数据和卸载。
 - 文件管理独立窗口：目录浏览、缓存、上传、下载、新建目录、重命名、删除和图片预览。
 - 设备信息独立窗口：Android/SDK/安全补丁/构建版本、CPU、内存、存储、显示、电池和网络信息。
 - 截图后自动复制到剪贴板，并在主工作台右侧预览；支持另存为、再次复制、缩放和图片信息。

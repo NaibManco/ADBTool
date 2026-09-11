@@ -121,6 +121,7 @@ export interface ApkFile {
   path: string;
   name: string;
   size: number;
+  packageName?: string;
 }
 
 export interface ApkInstallOptions {
@@ -360,6 +361,10 @@ export interface AndroidToolApi {
   getManagedAppDetails(serial: string, packageName: string): Promise<ManagedAppDetails>;
   uninstallApp(serial: string, packageName: string): Promise<ActionResult>;
   forceStopApp(serial: string, packageName: string): Promise<ActionResult>;
+  launchApp(serial: string, packageName: string): Promise<ActionResult>;
+  pairWireless(host: string, port: number, code: string): Promise<ActionResult>;
+  connectWireless(host: string, port: number): Promise<ActionResult>;
+  connectWirelessViaUsb(serial: string): Promise<ActionResult>;
   captureScreenshot(serial: string): Promise<ActionResult>;
   copyCaptureMedia(id: string): Promise<ActionResult>;
   saveCaptureMediaAs(id: string): Promise<ActionResult>;

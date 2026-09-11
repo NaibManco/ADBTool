@@ -1,4 +1,5 @@
 import path from "node:path";
+import * as nodeOs from "node:os";
 import {
   copyFileSync,
   mkdtempSync,
@@ -33,7 +34,9 @@ import type {
   ThemeMode
 } from "../shared/types";
 import { LOGCAT_BUFFERS } from "../shared/types";
-import { AdbClient, ApkInstallError } from "./adb";
+import { AdbClient, ApkInstallError, findLocalSubnetMatch } from "./adb";
+import type { LocalIpv4Interface } from "./adb";
+import { readApkPackageName } from "./apk-manifest";
 import { ClipboardSyncManager } from "./clipboard-sync-manager";
 import { DecompileManager } from "./decompile-manager";
 import { EmbeddedMirrorManager } from "./embedded-mirror-manager";
@@ -187,6 +190,65 @@ function assertLogcatBuffer(buffer: string): LogcatBuffer {
     throw new Error("日志缓冲区无效");
   }
   return buffer as LogcatBuffer;
+}
+
+const WIRELESS_HOST_PATTERN = /^[A-Za-z0-9._-]+$/;
+
+function assertWirelessAddress(host: string, port: number): string {
+  if (!WIRELESS_HOST_PATTERN.test(host)) {
+    throw new Error("设备地址格式无效");
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("端口无效（1-65535）");
+  }
+  return `${host}:${port}`;
+}
+
+const delay = (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+
+function localIpv4Interfaces(): LocalIpv4Interface[] {
+  const result: LocalIpv4Interface[] = [];
+  for (const entries of Object.values(nodeOs.networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (entry.family === "IPv4" && !entry.internal) {
+        result.push({ address: entry.address, netmask: entry.netmask });
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * 连接失败时的网段诊断：目标 IP 不落在任何本机网卡子网时，附加明确指引。
+ * 典型场景：手机连的 Wi-Fi 与电脑所在网络不同（如手机 192.168.137.x、电脑 172.16.x），
+ * TCP 层不可达，任何重试都无效——直接告诉用户把电脑加入手机所在 Wi-Fi。
+ */
+function withSubnetDiagnosis(
+  address: string,
+  result: import("./adb").WirelessResult
+): import("./adb").WirelessResult {
+  if (result.ok) return result;
+  const host = address.split(":", 1)[0];
+  if (!/^\d+(?:\.\d+){3}$/.test(host)) return result;
+  const interfaces = localIpv4Interfaces();
+  if (findLocalSubnetMatch(host, interfaces)) return result;
+  const localList = [...new Set(interfaces.map((item) => item.address))].join(" / ");
+  return {
+    ok: false,
+    message: `${result.message}\n诊断：设备 ${address} 不在本机任何网段（本机 IPv4：${localList || "无"}）。请让电脑加入手机所在的 Wi-Fi（或让手机连接电脑开的热点）后重试；两者不在同一局域网时连接必然超时。`
+  };
+}
+
+/** 补充 APK 包名；识别失败不阻断选择流程（返回原对象）。 */
+async function withPackageName(apk: ApkFile): Promise<ApkFile> {
+  try {
+    return { ...apk, packageName: await readApkPackageName(apk.path) };
+  } catch {
+    return apk;
+  }
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -481,12 +543,14 @@ function registerIpc(): void {
         ? await dialog.showOpenDialog(parent, options)
         : await dialog.showOpenDialog(options);
       if (result.canceled || result.filePaths.length === 0) return undefined;
-      return readApkFile(result.filePaths[0]);
+      return withPackageName(readApkFile(result.filePaths[0]));
     }
   );
 
-  ipcMain.handle("apk:resolve-path", (_event, apkPath: string): ApkFile =>
-    readApkFile(apkPath.trim())
+  ipcMain.handle(
+    "apk:resolve-path",
+    async (_event, apkPath: string): Promise<ApkFile> =>
+      withPackageName(readApkFile(apkPath.trim()))
   );
 
   ipcMain.handle(
@@ -1032,6 +1096,92 @@ function registerIpc(): void {
         assertPackageName(packageName);
         await adb.forceStopApp(serial, packageName);
         return { ok: true, message: "应用已停止运行" };
+      } catch (error) {
+        return resultFromError(error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "apps:launch",
+    async (_event, serial: string, packageName: string): Promise<ActionResult> => {
+      try {
+        assertSerial(serial);
+        assertPackageName(packageName);
+        await adb.launchApp(serial, packageName);
+        return { ok: true, message: "应用已启动" };
+      } catch (error) {
+        return resultFromError(error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "adb:pair",
+    async (
+      _event,
+      host: string,
+      port: number,
+      code: string
+    ): Promise<ActionResult> => {
+      try {
+        const address = assertWirelessAddress(host, port);
+        if (!/^\d{4,8}$/.test(String(code).trim())) {
+          throw new Error("配对码无效，应为设备上显示的数字");
+        }
+        const result = await adb.pairWireless(address, String(code).trim());
+        return { ok: result.ok, message: result.message };
+      } catch (error) {
+        return resultFromError(error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "adb:connect",
+    async (_event, host: string, port: number): Promise<ActionResult> => {
+      try {
+        const address = assertWirelessAddress(host, port);
+        const result = withSubnetDiagnosis(
+          address,
+          await adb.connectWireless(address)
+        );
+        return { ok: result.ok, message: result.message };
+      } catch (error) {
+        return resultFromError(error);
+      }
+    }
+  );
+
+  // USB 一键无线：读取设备 Wi-Fi IP → adb tcpip 5555 → connect（adbd 切换需短暂等待）
+  ipcMain.handle(
+    "adb:connect-via-usb",
+    async (_event, serial: string): Promise<ActionResult> => {
+      try {
+        assertSerial(serial);
+        if (serial.includes(":")) {
+          throw new Error("该设备已是无线连接，请选择 USB 连接的设备");
+        }
+        const addresses = await adb.listDeviceIpv4(serial);
+        if (addresses.length === 0) {
+          throw new Error("未能读取设备 IP，请确认设备已连接 Wi-Fi 后重试");
+        }
+        await adb.enableTcpip(serial, 5555);
+        const address = `${addresses[0]}:5555`;
+        let result = await adb.connectWireless(address);
+        if (!result.ok) {
+          await delay(1500);
+          result = withSubnetDiagnosis(
+            address,
+            await adb.connectWireless(address)
+          );
+        }
+        return {
+          ok: result.ok,
+          message: result.ok
+            ? `已通过 Wi-Fi 连接 ${address}，现在可以拔掉 USB 线；设备重启或关闭无线调试后需重新连接`
+            : result.message
+        };
       } catch (error) {
         return resultFromError(error);
       }

@@ -15,7 +15,8 @@
 | 窗口 | openAppManagerWindow/openFileManagerWindow/openDeviceInfoWindow/openDecompilerWindow/openLogcatWindow(+getLogcatWindowDevices/removeLogcatWindowDevice) |
 | APK | selectApkFile/resolveApkPath/getDroppedFilePath/installApk |
 | 文件 | listDeviceFiles/selectDeviceUploadFiles/uploadDeviceFiles/downloadDeviceFile/getDeviceImagePreview/createDeviceDirectory/renameDeviceFile/deleteDeviceFile |
-| 应用 | listInstalledPackages/clearAppData/listManagedApps/getManagedAppDetails/uninstallApp/forceStopApp |
+| 应用 | listInstalledPackages/clearAppData/listManagedApps/getManagedAppDetails/uninstallApp/forceStopApp/launchApp |
+| 无线调试 | pairWireless/connectWireless/connectWirelessViaUsb |
 | 采集 | captureScreenshot/copyCaptureMedia/saveCaptureMediaAs/startScreenRecording/stopScreenRecording/listScreenRecordings |
 | 投屏 | startMirror/stopMirror（外部窗口）/startEmbeddedMirror/stopEmbeddedMirror/sendMirrorControl/onMirrorEvent |
 | 日志 | startLogcat/stopLogcat/setLogcatProcess/setLogcatBuffer/clearLogcatBuffer/exportLogcatText/copyLogcatText/listAppProcesses/onLogcatEvent/onLogcatDeviceAdd |
@@ -29,6 +30,8 @@
 `logcat:event`、`mirror:event`、`terminal:event`、`decompile:event`、`settings:theme-changed`、`logcat:device-add`——全部广播到所有窗口，渲染层按 serial/jobId/theme 自行过滤。
 
 ## 改类型时的检查清单
+
+- `ApkFile.packageName` 为可选字段：文件选择/路径解析时由主进程 `readApkPackageName` 尽力填充，解析失败保持 undefined（渲染层据此降级，不阻断选择/安装）。
 
 - `AndroidDevice` 加必填字段：同步 `parseAdbDevices` 的 `Omit<...>` 返回类型、`devices:list` handler、**全部渲染层测试夹具**（历史教训：`mirroringEmbedded` 加字段时 9 个测试文件要补）。
 - 事件 union 加变体：可选字段向后兼容优先；两侧（发送方/消费方）都要处理 unknown 兜底。

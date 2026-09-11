@@ -3,15 +3,24 @@ import {
   buildBugreportArgs,
   buildClearAppDataArgs,
   buildClearLogcatArgs,
+  buildConnectArgs,
   buildDeviceActionArgs,
+  buildDeviceIpv4Args,
   buildForceStopArgs,
   buildInstallArgs,
   buildKeyEventArgs,
+  buildLaunchAppArgs,
+  buildPairArgs,
+  buildTcpipArgs,
   buildUninstallArgs,
+  findLocalSubnetMatch,
   parseAdbDevices,
+  parseConnectResult,
+  parseDeviceIpv4Addresses,
   parseInstallFailure,
   parseManagedApps,
   parsePackageDetails,
+  parsePairResult,
   parseInstalledPackages,
   parseResumedPackages,
   parseRunningAppProcesses
@@ -362,5 +371,124 @@ describe("application process discovery", () => {
         foreground: false
       }
     ]);
+  });
+});
+
+describe("application launch", () => {
+  it("launches the launcher activity via monkey without knowing activity names", () => {
+    expect(buildLaunchAppArgs("serial-one", "com.example.alpha")).toEqual([
+      "-s",
+      "serial-one",
+      "shell",
+      "monkey",
+      "-p",
+      "com.example.alpha",
+      "-c",
+      "android.intent.category.LAUNCHER",
+      "1"
+    ]);
+  });
+});
+
+describe("wireless debugging", () => {
+  it("builds pair, connect, tcpip, and address-list commands", () => {
+    expect(buildPairArgs("192.168.1.5:37123", "482913")).toEqual([
+      "pair",
+      "192.168.1.5:37123",
+      "482913"
+    ]);
+    expect(buildConnectArgs("192.168.1.5:5555")).toEqual([
+      "connect",
+      "192.168.1.5:5555"
+    ]);
+    expect(buildTcpipArgs("serial-one", 5555)).toEqual([
+      "-s",
+      "serial-one",
+      "tcpip",
+      "5555"
+    ]);
+    expect(buildDeviceIpv4Args("serial-one")).toEqual([
+      "-s",
+      "serial-one",
+      "shell",
+      "ip",
+      "-o",
+      "-4",
+      "addr",
+      "show",
+      "scope",
+      "global"
+    ]);
+  });
+
+  it("parses device IPv4 addresses and prefers wlan interfaces", () => {
+    const output = [
+      "2: wlan0    inet 192.168.1.5/24 brd 192.168.1.255 scope global wlan0",
+      "8: rmnet_data0    inet 10.72.162.33/30 scope global rmnet_data0",
+      "3: wlan1    inet 192.168.2.7/24 scope global wlan1"
+    ].join("\n");
+
+    expect(parseDeviceIpv4Addresses(output)).toEqual([
+      "192.168.1.5",
+      "192.168.2.7",
+      "10.72.162.33"
+    ]);
+  });
+
+  it("maps pair results to success and friendly failures", () => {
+    expect(parsePairResult("Successfully paired to 192.168.1.5:37123")).toEqual({
+      ok: true,
+      message: expect.stringContaining("配对成功")
+    });
+    expect(
+      parsePairResult(
+        "Failed to pair to 192.168.1.5:37123: cannot connect to 192.168.1.5:37123: No connection could be made because the target machine actively refused it. (10061)"
+      )
+    ).toMatchObject({ ok: false });
+    expect(
+      parsePairResult(
+        "Failed to pair to 192.168.1.5:37123: cannot authenticate to target: wrong password"
+      )
+    ).toMatchObject({ ok: false });
+    expect(
+      parsePairResult("cannot connect to 192.168.1.5:37123: No route to host (10065)")
+    ).toMatchObject({ ok: false });
+  });
+
+  it("maps connect results to success and friendly failures", () => {
+    const connected = parseConnectResult("connected to 192.168.1.5:5555");
+    expect(connected.ok).toBe(true);
+    const already = parseConnectResult("already connected to 192.168.1.5:5555");
+    expect(already.ok).toBe(true);
+    expect(
+      parseConnectResult(
+        "failed to connect to '192.168.1.5:5555': cannot connect to 192.168.1.5:5555: A connection attempt failed because the connected party did not properly respond after a period of time (10060)"
+      )
+    ).toMatchObject({ ok: false });
+    expect(
+      parseConnectResult(
+        "cannot connect to 192.168.1.5:5555: No connection could be made because the target machine actively refused it. (10061)"
+      )
+    ).toMatchObject({ ok: false });
+  });
+});
+
+describe("findLocalSubnetMatch", () => {
+  const interfaces = [
+    { address: "172.16.130.30", netmask: "255.255.255.0" },
+    { address: "10.41.21.146", netmask: "255.255.0.0" }
+  ];
+
+  it("matches when the target falls inside a local interface subnet", () => {
+    expect(findLocalSubnetMatch("10.41.99.1", interfaces)).toBe("10.41.21.146");
+  });
+
+  it("detects a phone subnet the PC has no interface for", () => {
+    expect(findLocalSubnetMatch("192.168.137.5", interfaces)).toBeUndefined();
+  });
+
+  it("ignores invalid targets and malformed interfaces", () => {
+    expect(findLocalSubnetMatch("not-an-ip", interfaces)).toBeUndefined();
+    expect(findLocalSubnetMatch("192.168.137.5", [])).toBeUndefined();
   });
 });

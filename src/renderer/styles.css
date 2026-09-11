@@ -6875,3 +6875,298 @@ footer b {
   background: #f9ecec;
   color: #7d3a3a;
 }
+
+/* ---- 应用一键启动 ---- */
+
+.app-launch-button {
+  color: #7fe7c8;
+  border: 1px solid #2d6759;
+  background: #112a24;
+}
+
+:root[data-theme="light"] .app-launch-button {
+  color: #17795e;
+  border-color: #a9d8c9;
+  background: #eafaf4;
+}
+
+/* ---- Logcat 崩溃提醒 ---- */
+
+.logcat-toolbar .crash-alert {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  height: 34px;
+  border: 1px solid #61383a;
+  border-radius: 7px;
+  background: #291719;
+}
+
+.logcat-toolbar .crash-alert-copy {
+  padding: 0 11px;
+  color: #f2a7a7;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.logcat-toolbar .crash-alert-copy:hover {
+  color: #ffd6d6;
+}
+
+.logcat-toolbar .crash-alert-dismiss {
+  width: 26px;
+  color: #c98d8d;
+  border: 0;
+  border-left: 1px solid #61383a;
+  background: transparent;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.logcat-toolbar .crash-alert-dismiss:hover {
+  color: #ffd6d6;
+  background: #38201f;
+}
+
+:root[data-theme="light"] .logcat-toolbar .crash-alert {
+  border-color: #dcb9ba;
+  background: #f9ecec;
+}
+
+:root[data-theme="light"] .logcat-toolbar .crash-alert-copy,
+:root[data-theme="light"] .logcat-toolbar .crash-alert-dismiss {
+  color: #9c4747;
+}
+
+:root[data-theme="light"] .logcat-toolbar .crash-alert-dismiss {
+  border-left-color: #dcb9ba;
+}
+
+/* ---- 安装后启动选项 ---- */
+
+.apk-launch-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: auto;
+  color: #8b9aa1;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.apk-launch-option input {
+  accent-color: #35c9a5;
+}
+
+.apk-launch-option.checked span {
+  color: #7fe7c8;
+}
+
+:root[data-theme="light"] .apk-launch-option {
+  color: #556a72;
+}
+
+:root[data-theme="light"] .apk-launch-option.checked span {
+  color: #17795e;
+}
+
+/* ---- 无线连接 ---- */
+
+.rail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.rail-wireless-button {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  color: #81939b;
+  border: 1px solid #2a3941;
+  border-radius: 7px;
+  background: #121c22;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.rail-wireless-button:hover {
+  color: #62dfc3;
+  border-color: #356658;
+}
+
+.rail-empty-wireless {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 0 12px;
+  color: #9ec6bd;
+  border: 1px solid #356658;
+  border-radius: 7px;
+  background: #112a24;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.rail-empty-wireless:hover {
+  color: #62dfc3;
+}
+
+.wireless-panel {
+  width: min(560px, 100%);
+}
+
+.wireless-hint {
+  margin: 0 0 10px;
+  color: #667982;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.wireless-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wireless-row select {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  color: #d6e1e4;
+  border: 1px solid #293840;
+  border-radius: 7px;
+  background: #121b21;
+  font-size: 12px;
+}
+
+.wireless-fields {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.wireless-fields input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  color: #d6e1e4;
+  border: 1px solid #293840;
+  border-radius: 7px;
+  background: #121b21;
+  font: 12px "Cascadia Mono", Consolas, monospace;
+  outline: 0;
+}
+
+.wireless-fields input:focus {
+  border-color: #356658;
+}
+
+.wireless-fields input::placeholder {
+  color: #53666f;
+  font-family: inherit;
+}
+
+.wireless-fields button,
+.wireless-primary {
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0 14px;
+  color: #7fe7c8;
+  border: 1px solid #2d6759;
+  border-radius: 7px;
+  background: #112a24;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wireless-fields button:hover,
+.wireless-primary:hover {
+  color: #62dfc3;
+}
+
+.wireless-fields button:disabled,
+.wireless-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.wireless-empty {
+  margin: 0;
+  flex: 1;
+  color: #53666f;
+  font-size: 11px;
+}
+
+.wireless-status {
+  margin: 0 22px 20px;
+  padding: 9px 11px;
+  border-radius: 7px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.wireless-status.success {
+  color: #65d9bd;
+  border: 1px solid #285e52;
+  background: #10251f;
+}
+
+.wireless-status.error {
+  color: #e8a1a1;
+  border: 1px solid #5c363a;
+  background: #261719;
+}
+
+:root[data-theme="light"] .rail-wireless-button {
+  color: #4c6068;
+  border-color: #c5d2d6;
+  background: #fff;
+}
+
+:root[data-theme="light"] .rail-wireless-button:hover,
+:root[data-theme="light"] .rail-empty-wireless,
+:root[data-theme="light"] .wireless-fields button,
+:root[data-theme="light"] .wireless-primary {
+  color: #17795e;
+  border-color: #a9d8c9;
+  background: #eafaf4;
+}
+
+:root[data-theme="light"] .wireless-hint,
+:root[data-theme="light"] .wireless-empty {
+  color: #63787f;
+}
+
+:root[data-theme="light"] .wireless-row select,
+:root[data-theme="light"] .wireless-fields input {
+  color: #25383f;
+  border-color: #c5d2d6;
+  background: #fff;
+}
+
+:root[data-theme="light"] .wireless-fields input::placeholder {
+  color: #8fa1a8;
+}
+
+:root[data-theme="light"] .wireless-status.success {
+  color: #17795e;
+  border-color: #a9d8c9;
+  background: #eafaf4;
+}
+
+:root[data-theme="light"] .wireless-status.error {
+  color: #9c4747;
+  border-color: #dcb9ba;
+  background: #f9ecec;
+}

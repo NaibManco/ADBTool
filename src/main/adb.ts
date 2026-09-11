@@ -148,6 +148,87 @@ export function buildForceStopArgs(
   return ["-s", serial, "shell", "am", "force-stop", packageName];
 }
 
+export function buildLaunchAppArgs(
+  serial: string,
+  packageName: string
+): string[] {
+  // monkey 免 root 启动：不需要知道入口 Activity 名即可拉起 launcher intent
+  return [
+    "-s",
+    serial,
+    "shell",
+    "monkey",
+    "-p",
+    packageName,
+    "-c",
+    "android.intent.category.LAUNCHER",
+    "1"
+  ];
+}
+
+export function buildPairArgs(address: string, code: string): string[] {
+  return ["pair", address, code];
+}
+
+export function buildConnectArgs(address: string): string[] {
+  return ["connect", address];
+}
+
+export function buildTcpipArgs(serial: string, port: number): string[] {
+  return ["-s", serial, "tcpip", String(port)];
+}
+
+export function buildDeviceIpv4Args(serial: string): string[] {
+  return ["-s", serial, "shell", "ip", "-o", "-4", "addr", "show", "scope", "global"];
+}
+
+export interface LocalIpv4Interface {
+  address: string;
+  netmask: string;
+}
+
+function ipv4ToNumber(ip: string): number | undefined {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return undefined;
+  let value = 0;
+  for (const part of parts) {
+    const octet = Number(part);
+    if (!Number.isInteger(octet) || octet < 0 || octet > 255) return undefined;
+    value = value * 256 + octet;
+  }
+  return value;
+}
+
+/** 判断 targetIp 是否落在某个本机 IPv4 接口的子网内；命中返回该接口地址。 */
+export function findLocalSubnetMatch(
+  targetIp: string,
+  interfaces: readonly LocalIpv4Interface[]
+): string | undefined {
+  const target = ipv4ToNumber(targetIp);
+  if (target === undefined) return undefined;
+  for (const item of interfaces) {
+    const address = ipv4ToNumber(item.address);
+    const netmask = ipv4ToNumber(item.netmask);
+    if (address === undefined || netmask === undefined) continue;
+    if ((target & netmask) === (address & netmask)) return item.address;
+  }
+  return undefined;
+}
+
+export function parseDeviceIpv4Addresses(output: string): string[] {
+  const entries = Array.from(
+    output.matchAll(
+      /inet\s+(\d+(?:\.\d+){3})\/\d+.*scope\s+global\s+(\S+)/g
+    ),
+    (match) => ({ address: match[1], iface: match[2] })
+  );
+  const wifi = entries.filter((item) => /^wlan/i.test(item.iface));
+  const other = entries.filter((item) => !/^wlan/i.test(item.iface));
+  return [...wifi, ...other]
+    .map((item) => item.address)
+    .filter((address) => address !== "127.0.0.1");
+}
+
 export function buildClearLogcatArgs(
   serial: string,
   buffer: LogcatBuffer
@@ -413,6 +494,80 @@ export class ApkInstallError extends Error {
   }
 }
 
+export interface WirelessResult {
+  ok: boolean;
+  message: string;
+}
+
+function clipRawOutput(output: string): string {
+  const normalized = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join(" ");
+  return normalized.length > RAW_FAILURE_LIMIT
+    ? `${normalized.slice(0, RAW_FAILURE_LIMIT)}…`
+    : normalized;
+}
+
+// 常见 socket 错误与 adb 文案（中英文 locale 均可能出现）统一归因
+const WIRELESS_UNREACHABLE =
+  /no route to host|host unreachable|unreachable network|network unreachable|timed out|\(10065\)|\(10060\)|\(10071\)/i;
+const WIRELESS_REFUSED = /connection refused|actively refused|\(10061\)/i;
+const WIRELESS_AUTH = /cannot authenticate|failed to authenticate|closed before.*handshake|\(10054\)|connection reset/i;
+
+export function parsePairResult(output: string): WirelessResult {
+  const text = output.trim();
+  if (/successfully paired/i.test(text)) {
+    return { ok: true, message: "配对成功，现在可以用无线调试主界面的 IP 和端口连接" };
+  }
+  if (WIRELESS_REFUSED.test(text)) {
+    return {
+      ok: false,
+      message: "配对端口拒绝连接：配对弹窗关闭后端口即失效，请在设备上重新打开「使用配对码配对设备」，用新端口和新配对码重试。"
+    };
+  }
+  if (WIRELESS_AUTH.test(text) || /wrong|password|配对码/i.test(text)) {
+    return {
+      ok: false,
+      message: "配对失败：配对码不正确或已过期，请在设备上重新查看配对码。"
+    };
+  }
+  if (WIRELESS_UNREACHABLE.test(text)) {
+    return {
+      ok: false,
+      message: "无法连接到设备：请确认手机与电脑在同一 Wi-Fi，配对地址和端口输入正确。"
+    };
+  }
+  return { ok: false, message: `配对失败：${clipRawOutput(text) || "adb 未返回原因"}` };
+}
+
+export function parseConnectResult(output: string): WirelessResult {
+  const text = output.trim();
+  const already = /already connected to/i.test(text);
+  if (already || /^connected to/im.test(text)) {
+    return {
+      ok: true,
+      message: already ? "该设备地址已处于连接状态" : "已连接设备"
+    };
+  }
+  if (WIRELESS_REFUSED.test(text)) {
+    return {
+      ok: false,
+      message: "连接被拒绝：该端口没有监听。Android 11+ 无线调试请用主界面显示的「IP 地址和端口」（不是配对端口）；tcpip 模式请先用 USB 线执行一键无线连接。"
+    };
+  }
+  if (WIRELESS_UNREACHABLE.test(text)) {
+    return {
+      ok: false,
+      message: "无法访问设备：检查手机与电脑是否在同一网络、IP 是否正确、无线调试是否仍开启。"
+    };
+  }
+  if (WIRELESS_AUTH.test(text)) {
+    return {
+      ok: false,
+      message: "连接认证失败：请在设备屏幕上重新授权本机调试，或重新配对后再连。"
+    };
+  }
+  return { ok: false, message: `连接失败：${clipRawOutput(text) || "adb 未返回原因"}` };
+}
+
 function toInstallError(error: unknown): Error {
   const output = [
     (error as { stderr?: string })?.stderr,
@@ -543,6 +698,87 @@ export class AdbClient {
       buildForceStopArgs(serial, packageName),
       { windowsHide: true, timeout: 20_000 }
     );
+  }
+
+  async launchApp(serial: string, packageName: string): Promise<void> {
+    let stdout = "";
+    let stderr = "";
+    let failure: unknown;
+    try {
+      const result = await execFileAsync(
+        this.executable,
+        buildLaunchAppArgs(serial, packageName),
+        { windowsHide: true, timeout: 20_000 }
+      );
+      stdout = result.stdout ?? "";
+      stderr = result.stderr ?? "";
+    } catch (error) {
+      // monkey 对部分失败仍以退出码 0 结束，反之也有非零退出但输出可解释的情况，
+      // 两条路径的输出合并后统一归因。
+      stdout = (error as { stdout?: string })?.stdout ?? "";
+      stderr = (error as { stderr?: string })?.stderr ?? "";
+      failure = error;
+    }
+    const text = `${stdout}\n${stderr}`;
+    if (/No activities found to run/i.test(text)) {
+      throw new Error("该应用没有可启动的入口界面（缺少 LAUNCHER Activity）");
+    }
+    if (/monkey aborted/i.test(text)) {
+      throw new Error("设备端未能启动该应用，请确认包名仍安装在设备上");
+    }
+    if (failure !== undefined) throw failure;
+  }
+
+  async pairWireless(address: string, code: string): Promise<WirelessResult> {
+    return this.runWireless(buildPairArgs(address, code), parsePairResult);
+  }
+
+  async connectWireless(address: string): Promise<WirelessResult> {
+    return this.runWireless(buildConnectArgs(address), parseConnectResult);
+  }
+
+  private async runWireless(
+    args: string[],
+    parse: (output: string) => WirelessResult
+  ): Promise<WirelessResult> {
+    let text = "";
+    try {
+      const { stdout, stderr } = await execFileAsync(this.executable, args, {
+        windowsHide: true,
+        timeout: 15_000
+      });
+      text = `${stdout ?? ""}\n${stderr ?? ""}`;
+    } catch (error) {
+      text = [
+        (error as { stdout?: string })?.stdout,
+        (error as { stderr?: string })?.stderr,
+        error instanceof Error ? error.message : String(error)
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+    return parse(text);
+  }
+
+  async enableTcpip(serial: string, port: number): Promise<void> {
+    const { stdout } = await execFileAsync(
+      this.executable,
+      buildTcpipArgs(serial, port),
+      { windowsHide: true, timeout: 15_000 }
+    );
+    // 部分设备错误时退出码仍为 0，必须检查输出标记
+    if (!/restarting in TCP mode/i.test(stdout)) {
+      throw new Error(stdout.trim() || "设备未能切换到 TCP 调试模式");
+    }
+  }
+
+  async listDeviceIpv4(serial: string): Promise<string[]> {
+    const { stdout } = await execFileAsync(
+      this.executable,
+      buildDeviceIpv4Args(serial),
+      { windowsHide: true, timeout: 10_000 }
+    );
+    return parseDeviceIpv4Addresses(stdout);
   }
 
   async listAppProcesses(serial: string): Promise<AppProcess[]> {

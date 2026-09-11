@@ -4,6 +4,7 @@ import {
   DeviceMobile,
   MagnifyingGlass,
   Package,
+  Play,
   Power,
   Trash,
   Warning,
@@ -48,7 +49,7 @@ export function AppManager({
   const [query, setQuery] = useState("");
   const [loadingApps, setLoadingApps] = useState(initialApps === undefined);
   const [loadingDetails, setLoadingDetails] = useState(false);
-  const [operating, setOperating] = useState<"clear" | "stop" | "uninstall">();
+  const [operating, setOperating] = useState<"launch" | "clear" | "stop" | "uninstall">();
   const [status, setStatus] = useState<ActionResult>();
 
   useEffect(() => {
@@ -120,7 +121,7 @@ export function AppManager({
   const selectedApp = apps.find((app) => app.packageName === selectedPackage);
 
   async function performAction(
-    action: "clear" | "stop" | "uninstall",
+    action: "launch" | "clear" | "stop" | "uninstall",
     operation: () => Promise<ActionResult>
   ): Promise<void> {
     setOperating(action);
@@ -143,6 +144,13 @@ export function AppManager({
     } finally {
       setOperating(undefined);
     }
+  }
+
+  function launchApp(): void {
+    if (!selectedPackage || !serial) return;
+    void performAction("launch", () =>
+      window.androidTool.launchApp(serial, selectedPackage)
+    );
   }
 
   function clearData(): void {
@@ -309,6 +317,14 @@ export function AppManager({
 
                   <footer className="app-manager-actions">
                     <span><Warning size={14} /> 请确认当前设备和应用</span>
+                    <button
+                      className="app-launch-button"
+                      disabled={Boolean(operating)}
+                      onClick={launchApp}
+                    >
+                      <Play size={15} weight="fill" />
+                      {operating === "launch" ? "正在启动…" : "启动应用"}
+                    </button>
                     <button
                       className="app-force-stop-button"
                       disabled={Boolean(operating)}

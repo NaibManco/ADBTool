@@ -39,6 +39,24 @@ export interface RecentApk {
 
 const RECENT_APK_KEY = "androidDevTool.apk.recent.v1";
 const RECENT_APK_CAP = 5;
+const LAUNCH_AFTER_INSTALL_KEY = "androidDevTool.apk.launchAfterInstall.v1";
+
+/** 「安装成功后启动应用」勾选跨弹窗会话记忆：只存 "1"/"0"，读取异常按未勾选。 */
+function readLaunchAfterInstall(): boolean {
+  try {
+    return window.localStorage.getItem(LAUNCH_AFTER_INSTALL_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeLaunchAfterInstall(value: boolean): void {
+  try {
+    window.localStorage.setItem(LAUNCH_AFTER_INSTALL_KEY, value ? "1" : "0");
+  } catch {
+    // 存储不可用时勾选仅保留在本次弹窗
+  }
+}
 
 /** 成功安装后更新最近列表：按路径去重、新的在前、截断到上限。纯函数供单测。 */
 export function mergeRecentApk(
@@ -136,6 +154,9 @@ export function ApkInstaller({
     readRecentApks()
   );
   const [recentOpen, setRecentOpen] = useState(false);
+  const [launchAfterInstall, setLaunchAfterInstall] = useState(() =>
+    readLaunchAfterInstall()
+  );
   const installing = installState === "installing";
 
   useEffect(() => {
@@ -200,8 +221,12 @@ export function ApkInstaller({
 
   async function install(forceDowngrade = false): Promise<void> {
     if ((!file && !manualPath.trim()) || !selectedSerial || installing) return;
-    const apk = file ?? await resolveManualPath();
+    let apk = file ?? await resolveManualPath();
     if (!apk) return;
+    // 拖入的文件不经过主进程，缺包名时补读一次，供安装后启动使用
+    if (launchAfterInstall && !apk.packageName) {
+      apk = await window.androidTool.resolveApkPath(apk.path).catch(() => apk);
+    }
     setInstallState("installing");
     setInstallFailure(undefined);
     setProgress(12);
@@ -224,7 +249,21 @@ export function ApkInstaller({
       }
       setProgress(100);
       setInstallState("success");
-      setMessage(`已安装到 ${deviceLabel(onlineDevices.find((item) => item.serial === selectedSerial)!)}。`);
+      let suffix = "";
+      if (launchAfterInstall) {
+        if (apk.packageName) {
+          const launchResult = await window.androidTool.launchApp(
+            selectedSerial,
+            apk.packageName
+          );
+          suffix = launchResult.ok
+            ? "应用已启动。"
+            : `自动启动失败：${launchResult.message || "未知原因"}，可在应用管理中手动启动。`;
+        } else {
+          suffix = "未能识别 APK 包名，无法自动启动，可在应用管理中启动。";
+        }
+      }
+      setMessage(`已安装到 ${deviceLabel(onlineDevices.find((item) => item.serial === selectedSerial)!)}。${suffix}`);
       // 记录最近安装（失败不记录）
       const entry: RecentApk = {
         path: apk.path,
@@ -463,6 +502,21 @@ export function ApkInstaller({
         )}
 
         <footer className="apk-actions">
+          <label
+            className={launchAfterInstall ? "apk-launch-option checked" : "apk-launch-option"}
+            title="安装成功后立即在所选设备上启动该应用（离线解析 APK 包名）"
+          >
+            <input
+              type="checkbox"
+              checked={launchAfterInstall}
+              disabled={installing}
+              onChange={(event) => {
+                setLaunchAfterInstall(event.target.checked);
+                writeLaunchAfterInstall(event.target.checked);
+              }}
+            />
+            <span>安装成功后启动应用</span>
+          </label>
           <button className="apk-cancel" onClick={onClose} disabled={installing}>
             取消
           </button>

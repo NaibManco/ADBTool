@@ -22,6 +22,7 @@ import {
   parseQuery,
   queryHighlightTerms
 } from "./logcat-query";
+import { extractCrashStack, isCrashMarker } from "./logcat-crash";
 import { HighlightText } from "./HighlightText";
 
 const MAX_ENTRIES = 50_000;
@@ -166,6 +167,8 @@ function LogcatDevicePane({
   const [packageByPid, setPackageByPid] = useState(
     () => new Map<number, string>()
   );
+  // 检测到的崩溃（FATAL EXCEPTION）所在 entry 的 seq，最新在末尾
+  const [crashSeqs, setCrashSeqs] = useState<number[]>([]);
 
   const pendingEntries = useRef<BufferedEntry[]>([]);
   const seqRef = useRef(0);
@@ -178,10 +181,14 @@ function LogcatDevicePane({
       if (event.serial !== device.serial) return;
 
       if (event.type === "entry") {
+        const seq = seqRef.current++;
         pendingEntries.current.push({
           ...event.entry,
-          seq: seqRef.current++
+          seq
         });
+        if (isCrashMarker(event.entry.message)) {
+          setCrashSeqs((current) => [...current, seq]);
+        }
       } else {
         setRunning(event.running);
         if (event.running) {
@@ -326,6 +333,25 @@ function LogcatDevicePane({
     scrollAnchor.current = null;
     setRenderLimit(RENDER_WINDOW_DEFAULT);
     setEntries([]);
+    setCrashSeqs([]);
+  }
+
+  async function copyCrashStack(): Promise<void> {
+    const lastCrashSeq = crashSeqs[crashSeqs.length - 1];
+    const crashIndex = entries.findIndex(
+      (entry) => entry.seq === lastCrashSeq
+    );
+    if (crashIndex < 0) {
+      setStatusMessage("崩溃日志已被清出缓存，无法复制堆栈");
+      return;
+    }
+    const lines = extractCrashStack(entries, crashIndex);
+    const result = await window.androidTool.copyLogcatText(lines.join("\n"));
+    setStatusMessage(
+      result.ok
+        ? `已复制崩溃堆栈（${lines.length} 行）`
+        : result.message || "复制失败"
+    );
   }
 
   function handleOutputScroll(event: UIEvent<HTMLDivElement>): void {
@@ -667,6 +693,23 @@ function LogcatDevicePane({
         >
           {follow ? "⇣ 跟随中" : "⇣ 已停跟随"}
         </button>
+        {crashSeqs.length > 0 && (
+          <div
+            className="crash-alert"
+            title="检测到应用崩溃（FATAL EXCEPTION）。点击复制最近一次崩溃的完整堆栈"
+          >
+            <button className="crash-alert-copy" onClick={() => void copyCrashStack()}>
+              ⚠ 崩溃 ×{crashSeqs.length}
+            </button>
+            <button
+              className="crash-alert-dismiss"
+              onClick={() => setCrashSeqs([])}
+              title="清除崩溃提醒（不影响日志内容）"
+            >
+              ×
+            </button>
+          </div>
+        )}
         <button onClick={() => void copyVisibleLines()} title="复制当前显示的日志行">
           复制
         </button>

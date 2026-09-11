@@ -4,13 +4,14 @@
 
 ## 职责
 
-多设备实时日志：adb logcat 会话、查询语法过滤（渲染层）、缓冲区切换、导出/复制、跟随滚动、查询历史。
+多设备实时日志：adb logcat 会话、查询语法过滤（渲染层）、缓冲区切换、导出/复制、跟随滚动、查询历史、崩溃自动提示与一键复制堆栈。
 
 ## 文件
 
 - `src/main/logcat-manager.ts` — 会话管理：spawn `adb -s <s> logcat -b <buffer> -v threadtime -T 5000 [--pid=N]`；`LOGCAT_BACKLOG="5000"`；`lastOptions`（pid 权威、buffer 粘滞）；`setBuffer`/`resync`；`THREADTIME_PATTERN` 解析。
 - `src/renderer/LogcatPanel.tsx` — `LogcatWorkspace`（设备 Tab）+ `LogcatDevicePane`（全部 UI 状态按 serial 隔离在 pane 内）。
 - `src/renderer/logcat-query.ts` — 查询语法引擎（纯函数，无 React/Electron 依赖）。
+- `src/renderer/logcat-crash.ts` — 崩溃检测纯函数：`isCrashMarker`（消息以 `FATAL EXCEPTION` 开头）+ `extractCrashStack`（从标记行起收集同 tag、E/F 级、符合堆栈行形态的连续 raw 行）。
 - `src/renderer/HighlightText.tsx` — 命中词高亮切分（最早命中优先，段数上限 200）。
 - `src/main/adb.ts` — `buildClearLogcatArgs`（`-b <buffer> -c`，顺序敏感）+ `clearLogcatBuffer`。
 
@@ -49,6 +50,13 @@
 - 查询历史 localStorage `androidDevTool.logcat.queryHistory.v1`（≤15，全局共享）。
 - 双窗口同 serial：共享主进程会话，靠 status 事件 reconcile。
 
+## 崩溃自动提示
+
+- 入口处逐条检测（含会话启动时的缓冲区回放，历史崩溃也会提示）：消息以 `FATAL EXCEPTION` 开头即记入 pane 的 `crashSeqs`（seq 数组，最新在末尾）。
+- 工具栏红色角标 `⚠ 崩溃 ×N`：点击复制**最近一次**崩溃完整堆栈（`extractCrashStack` 后走 `copyLogcatText`），× 清除提醒。崩溃 entry 已被清出缓存时提示无法复制。
+- `clearDisplay()`（清空显示/切缓冲）同步清空 `crashSeqs`，角标消失。
+- 堆栈延续判定 = 同 tag + E/F 级 + 行形态（`Process:`/异常类名（必含点）/\tat/Caused by/... N more/Suppressed）。真实崩溃是单次写入整块输出，行间不会穿插其他日志；逐行注入的合成测试里穿插会导致只截到标记行，属预期。
+
 ## 测试
 
-`src/renderer/logcat-query.test.ts`（31 用例，最大套件）、`src/renderer/HighlightText.test.tsx`、`src/main/logcat-manager.test.ts`（spawn 参数/缓冲粘滞/resync）、`src/renderer/LogcatPanel.test.tsx`（宽松标记断言）。
+`src/renderer/logcat-query.test.ts`（31 用例，最大套件）、`src/renderer/logcat-crash.test.ts`（标记识别/堆栈截取/跨 tag 截断）、`src/renderer/HighlightText.test.tsx`、`src/main/logcat-manager.test.ts`（spawn 参数/缓冲粘滞/resync）、`src/renderer/LogcatPanel.test.tsx`（宽松标记断言）。

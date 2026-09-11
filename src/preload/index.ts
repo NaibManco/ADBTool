@@ -57,6 +57,14 @@ const api: AndroidToolApi = {
     ipcRenderer.invoke("apps:uninstall", serial, packageName),
   forceStopApp: (serial: string, packageName: string) =>
     ipcRenderer.invoke("apps:force-stop", serial, packageName),
+  launchApp: (serial: string, packageName: string) =>
+    ipcRenderer.invoke("apps:launch", serial, packageName),
+  pairWireless: (host: string, port: number, code: string) =>
+    ipcRenderer.invoke("adb:pair", host, port, code),
+  connectWireless: (host: string, port: number) =>
+    ipcRenderer.invoke("adb:connect", host, port),
+  connectWirelessViaUsb: (serial: string) =>
+    ipcRenderer.invoke("adb:connect-via-usb", serial),
   captureScreenshot: (serial: string) =>
     ipcRenderer.invoke("capture:screenshot", serial),
   copyCaptureMedia: (id: string) =>

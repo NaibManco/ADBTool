@@ -42,6 +42,8 @@ describe("ApkInstaller", () => {
     expect(html).toContain("Pixel Two");
     expect(html).toContain('type="radio"');
     expect(html).toContain("选择设备后安装");
+    expect(html).toContain("安装成功后启动应用");
+    expect(html).toContain('type="checkbox"');
   });
 });
 

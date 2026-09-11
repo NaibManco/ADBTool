@@ -27,7 +27,8 @@ import {
   Terminal as TerminalIcon,
   TerminalWindow,
   UploadSimple,
-  VideoCamera
+  VideoCamera,
+  WifiHigh
 } from "@phosphor-icons/react";
 import type {
   ActionResult,
@@ -42,6 +43,7 @@ import { CapturePreview } from "./CapturePreview";
 import { LogcatWorkspace } from "./LogcatPanel";
 import { MirrorPane } from "./MirrorPane";
 import { TerminalPane } from "./TerminalPane";
+import { WirelessConnect } from "./WirelessConnect";
 
 const ACTIONS: Array<{
   action: DeviceAction;
@@ -655,6 +657,7 @@ export function App() {
   const [recordingStarts, setRecordingStarts] = useState<Map<string, number>>(new Map());
   const [recordingNow, setRecordingNow] = useState(Date.now());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [wirelessOpen, setWirelessOpen] = useState(false);
   const [apkOpen, setApkOpen] = useState(false);
   const [droppedApk, setDroppedApk] = useState<ReturnType<typeof fileFromDrop>>();
   const [railCollapsed, setRailCollapsed] = useState(false);
@@ -1128,14 +1131,6 @@ export function App() {
             安装 APK
           </button>
           <button
-            className="refresh-button"
-            onClick={() => void refresh(true)}
-            disabled={loading}
-          >
-            <span className={loading ? "spinning" : ""}>↻</span>
-            刷新
-          </button>
-          <button
             className="settings-button"
             onClick={() => setSettingsOpen(true)}
             aria-label="打开设置"
@@ -1189,15 +1184,27 @@ export function App() {
                 <p>{loading ? "正在刷新…" : `${onlineCount} 台在线`}</p>
               </div>
             )}
-            <button
-              className="rail-collapse"
-              onClick={() => setRailCollapsed((current) => !current)}
-              title={railCollapsed ? "展开设备栏" : "收起设备栏"}
-            >
-              {railCollapsed
-                ? <CaretDoubleRight size={15} />
-                : <CaretDoubleLeft size={15} />}
-            </button>
+            <div className="rail-header-actions">
+              {!railCollapsed && (
+                <button
+                  className="rail-wireless-button"
+                  onClick={() => setWirelessOpen(true)}
+                  title="无线连接设备（Wi-Fi ADB：USB 一键转无线或配对码连接）"
+                >
+                  <WifiHigh size={15} />
+                  <span>无线</span>
+                </button>
+              )}
+              <button
+                className="rail-collapse"
+                onClick={() => setRailCollapsed((current) => !current)}
+                title={railCollapsed ? "展开设备栏" : "收起设备栏"}
+              >
+                {railCollapsed
+                  ? <CaretDoubleRight size={15} />
+                  : <CaretDoubleLeft size={15} />}
+              </button>
+            </div>
           </header>
 
           <div className="rail-device-list">
@@ -1206,7 +1213,16 @@ export function App() {
             ) : devices.length === 0 ? (
               <div className="rail-empty">
                 <DeviceMobile size={28} />
-                {!railCollapsed && <p>未发现设备<br /><small>请检查 USB 调试授权</small></p>}
+                {!railCollapsed && <p>未发现设备<br /><small>请检查 USB 调试授权，或使用无线连接</small></p>}
+                {!railCollapsed && (
+                  <button
+                    className="rail-empty-wireless"
+                    onClick={() => setWirelessOpen(true)}
+                  >
+                    <WifiHigh size={14} />
+                    无线连接设备
+                  </button>
+                )}
               </div>
             ) : (
               devices.map((device) => (
@@ -1419,6 +1435,13 @@ export function App() {
           theme={theme}
           onThemeChange={(nextTheme) => void changeTheme(nextTheme)}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
+      {wirelessOpen && (
+        <WirelessConnect
+          devices={devices}
+          onClose={() => setWirelessOpen(false)}
         />
       )}
 

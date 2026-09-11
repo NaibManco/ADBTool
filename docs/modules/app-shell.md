@@ -10,6 +10,7 @@ Electron 应用生命周期、主窗口/独立窗口的创建与路由、主界�
 
 - `src/main/main.ts` — 应用入口：窗口创建（主窗口 1180×760）、`registerIpc()` 全部 IPC 注册、各服务实例化、退出清理（`window-all-closed`：scrcpy/embeddedMirror/logcat/terminal 全停）。
 - `src/renderer/App.tsx` — 主界面：`App`（当前实现）与 `LegacyApp`（旧版保留但不再入口使用）、`DeviceRailCard` 设备卡、右侧工作区三视图。
+- `src/renderer/WirelessConnect.tsx` — 无线连接弹窗（复用 `settings-overlay`/`settings-panel` 模态样式）：方式一 USB 一键转无线（仅列 USB 形态在线设备）+ 方式二 Android 11+ 配对码配对/连接。入口在设备栏头部「无线」按钮与空设备状态。
 - `src/renderer/main.tsx` — 按 URL `?view=` 路由：无 view=主界面，`logcat`/`decompiler`/`apps`/`files`/`device-info` 各自窗口。
 - `src/main/settings.ts` — `SettingsStore`（`userData/settings.json`，目前仅 `theme`；未知字段读取时丢弃，加字段需同步 `parseSettings`）。
 - `src/renderer/theme.ts` — `useTheme`，订阅 `settings:theme-changed` 广播同步所有窗口。

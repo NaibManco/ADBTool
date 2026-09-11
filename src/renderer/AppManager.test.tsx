@@ -44,5 +44,6 @@ describe("AppManager", () => {
     expect(html).toContain("清除数据");
     expect(html).toContain("停止运行");
     expect(html).toContain("卸载应用");
+    expect(html).toContain("启动应用");
   });
 });

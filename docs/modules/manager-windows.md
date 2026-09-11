@@ -4,12 +4,12 @@
 
 ## 职责
 
-三个独立管理窗口：应用管理（信息/停止/清数据/卸载）、文件管理（浏览/上传/下载/重命名/删除/图片预览）、设备信息（系统/硬件/显示/电池/网络）。
+三个独立管理窗口：应用管理（信息/启动/停止/清数据/卸载）、文件管理（浏览/上传/下载/重命名/删除/图片预览）、设备信息（系统/硬件/显示/电池/网络）。
 
 ## 文件
 
 - `src/renderer/ManagerWindow.tsx` — 路由壳：2.5s 设备轮询，按 `view` 分发到三个面板（设备断线用 `deviceKey` 强制重挂载）。
-- `src/renderer/AppManager.tsx` — 应用列表 + `ManagedAppDetails`（`dumpsys package` 解析）+ 危险操作确认。
+- `src/renderer/AppManager.tsx` — 应用列表 + `ManagedAppDetails`（`dumpsys package` 解析）+ 危险操作确认 + 启动按钮（`launchApp`，monkey 拉起，非危险操作无确认）。
 - `src/renderer/FileManager.tsx` — 设备文件树 + 传输 + 图片预览。
 - `src/renderer/DeviceInfoPanel.tsx` — `DeviceInfo` 聚合展示。
 - `src/main/device-files.ts` — 设备文件 adb shell 命令构造（`buildListFilesArgs` 等，**含 shellQuote/shellCommand 转义纯函数**——项目里唯一允许拼 shell 命令串的地方，远端 shell 需要）。
