@@ -73,6 +73,15 @@ export class EmbeddedMirrorManager {
     return this.sessions.has(serial);
   }
 
+  /** 当前会话的视频尺寸（session 包到达后有效）；供独立窗口按比例自适应。 */
+  getVideoSize(serial: string): { width: number; height: number } | undefined {
+    const session = this.sessions.get(serial);
+    if (!session || !session.width || !session.height) {
+      return undefined;
+    }
+    return { width: session.width, height: session.height };
+  }
+
   async start(serial: string, target?: WebContents): Promise<void> {
     // 宽限期内有人接入：撤销挂起的销毁，走下面的 resync 路径接上
     const pendingStop = this.pendingStops.get(serial);

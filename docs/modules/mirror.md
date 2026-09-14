@@ -9,7 +9,7 @@
 ## 文件
 
 - `src/main/embedded-mirror-manager.ts` — 会话核心：@yume-chan（scrcpy 4.0）会话管理、视频包广播、控制注入。内嵌面板与独立窗口都是它的消费者。
-- `src/main/main.ts` — `mirrorWindows`（serial → BrowserWindow）：`createMirrorWindow`（420×780，`?view=mirror&serial=&label=`，label 用于窗口标题）、`closeMirrorWindow`（幂等：删表 → close → 停会话）、`mirror:start`/`mirror:stop`/`mirror:embedded-start` handler 的互斥编排。
+- `src/main/main.ts` — `mirrorWindows`（serial → BrowserWindow）：`createMirrorWindow`（420×780 起始，`?view=mirror&serial=&label=`，label 用于窗口标题）、`fitMirrorWindowToVideo`（session 包/活会话弹出时按视频宽高比自适应）、`closeMirrorWindow`（幂等：删表 → close → 停会话）、`mirror:start`/`mirror:stop`/`mirror:embedded-start` handler 的互斥编排。
 - `src/renderer/MirrorPane.tsx` — 内嵌解码面板：WebCodecsVideoDecoder、canvas 挂载、指针/滚轮/右键交互。
 - `src/renderer/MirrorWindow.tsx` — 独立窗口页面：同一套解码/交互逻辑，无面板装饰；会话结束（运行过）立即自动关窗，启动失败展示错误 4 秒后关窗。
 - `src/renderer/mirror-control.ts` — 纯坐标映射（`normalizedPoint` 归一化钳制、`wheelToScroll` 滚轮方向翻转，-0 已修）。
@@ -60,7 +60,7 @@
 ## 已知边界
 
 - H.265/AV1 未启用（固定 h264，WebCodecs 能力有但未开选项）。
-- 独立窗口固定 420×780 起始尺寸，视频等比缩放居中（`object-fit` 语义由 max-width/max-height 实现）；不随视频比例自适应窗口大小。
+- 独立窗口 420×780 起始（适合手机竖屏）；视频首个 session 包到达后 `fitMirrorWindowToVideo` 按宽高比自适应内容区（适配 70%×75% 工作区、不放大超过原视频分辨率），首次 fit 居中。同比例重复触发（<5% 偏差）跳过，不与用户手动改窗打架；手机横竖屏切换会重 fit。视频本体始终等比缩放居中（max-width/max-height）。
 - 无键盘输入注入（旧 scrcpy.exe 有；内嵌面板本就没有，为保持一致未做）。需要敲字用终端或真机输入法。
 - GOP 缓存超限（300 包/8MB，长时间无 IDR 的高码率动态画面）时降级为等线上关键帧，晚接入首帧变慢但不失败。
 - `videoCodecOptions` 用字符串形式 `"i-frame-interval=2"`（@yume-chan/scrcpy 根入口不导出 CodecOptions 类）；部分设备编码器无视该参数，GOP 缓存兜底。

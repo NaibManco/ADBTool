@@ -104,6 +104,10 @@ const embeddedMirror = new EmbeddedMirrorManager(
       }
       return;
     }
+    if (event.type === "video" && event.kind === "session") {
+      // 独立窗口按视频宽高比自适应（横屏设备开窗后首个 session 包触发）
+      fitMirrorWindowToVideo(event.serial, event.width ?? 0, event.height ?? 0);
+    }
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) {
         window.webContents.send("mirror:event", event);
@@ -480,6 +484,38 @@ async function createManagerWindow(view: ManagerView): Promise<BrowserWindow> {
 
 // 独立投屏窗口：yume-chan 会话的视频流渲染到独立 BrowserWindow，
 // 取代外部 scrcpy.exe（其 SDL 显示层在部分机器上必然段错误）。
+// 初始 420×780 纵向适合手机；首个视频 session 包到达后按实际
+// 宽高比自适应（眼镜等横向设备不会再被压成竖窗里的小条）。
+const mirrorWindowAspect = new Map<string, number>();
+
+function fitMirrorWindowToVideo(
+  serial: string,
+  width: number,
+  height: number
+): void {
+  if (!width || !height) return;
+  const window = mirrorWindows.get(serial);
+  if (!window || window.isDestroyed()) return;
+  // 宽高比没变（<5%）不动作：换设备/重开窗口后的首次 fit、
+  // 以及手机横竖屏切换的重 fit 才调整，用户手动改窗不被覆盖
+  const aspect = width / height;
+  const last = mirrorWindowAspect.get(serial);
+  if (last !== undefined && Math.abs(aspect - last) < last * 0.05) return;
+  const firstFit = last === undefined;
+  mirrorWindowAspect.set(serial, aspect);
+  const area = screen.getDisplayMatching(window.getBounds()).workArea;
+  const scale = Math.min(
+    (area.width * 0.7) / width,
+    (area.height * 0.75) / height,
+    1
+  );
+  window.setContentSize(
+    Math.max(320, Math.round(width * scale)),
+    Math.max(200, Math.round(height * scale))
+  );
+  if (firstFit) window.center();
+}
+
 async function createMirrorWindow(
   serial: string,
   label: string
@@ -505,6 +541,7 @@ async function createMirrorWindow(
   window.on("closed", () => {
     if (mirrorWindows.get(serial) === window) {
       mirrorWindows.delete(serial);
+      mirrorWindowAspect.delete(serial);
       void embeddedMirror.stop(serial);
     }
   });
@@ -516,7 +553,10 @@ async function createMirrorWindow(
 function closeMirrorWindowOnly(serial: string): void {
   const existing = mirrorWindows.get(serial);
   if (!existing) return;
+  // 先删条目会让 closed 守卫（get(serial) === window）不再命中，
+  // aspect 状态要在这里同步清，否则残留值会吞掉下次开窗的首次 fit
   mirrorWindows.delete(serial);
+  mirrorWindowAspect.delete(serial);
   if (!existing.isDestroyed()) {
     existing.close();
   }
@@ -868,6 +908,12 @@ function registerIpc(): void {
           return { ok: true };
         }
         await createMirrorWindow(serial, safeLabel);
+        // 会话已在跑（内嵌弹出场景）：resync 不重发 session 包，
+        // 这里直接按已知尺寸适配；新会话则等广播路径触发
+        const size = embeddedMirror.getVideoSize(serial);
+        if (size) {
+          fitMirrorWindowToVideo(serial, size.width, size.height);
+        }
         return { ok: true };
       } catch (error) {
         return resultFromError(error);
