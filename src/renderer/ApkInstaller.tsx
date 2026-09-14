@@ -244,6 +244,9 @@ export function ApkInstaller({
         apk.path,
         forceDowngrade ? { forceDowngrade: true } : undefined
       );
+      // 安装已定局（成功/失败都不再爬假进度）：立刻停表，
+      // 否则启动应用等待期间 tick 会把 100 削回 Math.min 的 88
+      window.clearInterval(timer);
       if (!result.ok) {
         setInstallState("error");
         setInstallFailure(result.installFailure);
