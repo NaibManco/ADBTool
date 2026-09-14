@@ -6019,6 +6019,10 @@ footer b {
   height: 100vh;
   overflow: hidden;
   background: #05090d;
+  /* 覆盖全局 main 的内容区内边距（0 clamp(24px,3vw,64px) 28px）：
+     全屏视频页必须吃满窗口，否则画面被挤偏且四周留不对称黑边 */
+  padding: 0;
+  margin: 0;
 }
 
 .mirror-window-host {
