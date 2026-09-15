@@ -1,10 +1,10 @@
-# APK 安装
+# APK 安装与提取
 
-> 父文档：[AGENTS.md](../../AGENTS.md) · 相关：[ADB](adb-device.md)、[APK 反编译](decompile.md)
+> 父文档：[AGENTS.md](../../AGENTS.md) · 相关：[ADB](adb-device.md)、[APK 反编译](decompile.md)、[应用管理](manager-windows.md)
 
 ## 职责
 
-APK 安装：文件选择/拖入/手输路径三种入口，主进程校验，失败中文归因，降级安装二次确认，安装后可选自动启动。
+APK 安装：文件选择/拖入/手输路径三种入口，主进程校验，失败中文归因，降级安装二次确认，安装后可选自动启动。APK 提取：把设备端已装应用的 base.apk 拉回本机备份。
 
 ## 文件
 
@@ -21,6 +21,13 @@ APK 安装：文件选择/拖入/手输路径三种入口，主进程校验，�
 - **最近安装**：成功安装后记入 localStorage `androidDevTool.apk.recent.v1`（按路径去重、新的在前、上限 5 条，`mergeRecentApk` 纯函数 + 单测）。弹窗内"最近安装（N）"**默认收起**（`recentOpen` 状态），点击标题条展开/收起（箭头随旋转）；点击条目即校验路径（`resolveApkPath`，文件被删则报"历史文件已不可用"）并预选上次目标设备；失败安装不记录。
 - 失败保留原始 adb 输出（title 悬停可见），不吞真实错误。
 - 全局拖 APK 到主窗口任意位置也能唤起安装（`.apk-global-drop` 遮罩）。
+
+## APK 提取（应用管理 → 提取 APK）
+
+- `apps:pull-apk` handler（main.ts）：校验 serial/packageName/设备端路径（须 `.apk` 结尾）→ 保存对话框（默认下载目录、文件名 `<包名>.apk`）→ `DeviceFileManager.pullFileTo`（`adb -s <s> pull <remote> <local>`，拉到具体文件路径而非目录）→ 空文件校验 → `showItemInFolder`。
+- 入口在应用管理详情页操作区（`AppManager.tsx` 的"提取 APK"按钮），用 `ManagedApp.apkPath`（`pm list packages -f` 给出的 base.apk 路径）。
+- **split APK 只拉 base.apk**：`pm path` 显示多个 split 的应用（语言/ABI 分包），其余 split 不拉——单独安装 base 会缺资源，需要完整备份时看设备端路径手动操作文件管理。
+- 真机验证：PKB110 拉取 179MB Settings.apk 成功（34.7 MB/s）。
 
 ## AXML 解析边界（apk-manifest.ts）
 

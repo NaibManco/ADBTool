@@ -10,8 +10,30 @@ describe("settings", () => {
   });
 
   it("recovers safely from missing or malformed settings", () => {
-    expect(parseSettings('{"theme":"light"}')).toEqual({ theme: "light" });
-    expect(parseSettings('{"theme":"unknown"}')).toEqual({ theme: "dark" });
-    expect(parseSettings("not-json")).toEqual({ theme: "dark" });
+    expect(parseSettings('{"theme":"light"}')).toEqual({
+      theme: "light",
+      mirrorQuality: "balanced"
+    });
+    expect(parseSettings('{"theme":"unknown"}')).toEqual({
+      theme: "dark",
+      mirrorQuality: "balanced"
+    });
+    expect(parseSettings("not-json")).toEqual({
+      theme: "dark",
+      mirrorQuality: "balanced"
+    });
+  });
+
+  it("persists mirror quality presets with safe fallback", () => {
+    expect(parseSettings('{"theme":"dark","mirrorQuality":"high"}')).toEqual({
+      theme: "dark",
+      mirrorQuality: "high"
+    });
+    expect(
+      parseSettings('{"theme":"dark","mirrorQuality":"ultra"}')
+    ).toEqual({
+      theme: "dark",
+      mirrorQuality: "balanced"
+    });
   });
 });

@@ -104,6 +104,15 @@ export function buildPullFileArgs(
   return ["-s", serial, "pull", normalizeDevicePath(remotePath), localDirectory];
 }
 
+/** 拉取设备文件到本机具体文件路径（APK 提取备份用）。 */
+export function buildPullFileToArgs(
+  serial: string,
+  remotePath: string,
+  localFilePath: string
+): string[] {
+  return ["-s", serial, "pull", normalizeDevicePath(remotePath), localFilePath];
+}
+
 export function buildReadFileArgs(serial: string, remotePath: string): string[] {
   const command = `cat -- ${shellQuote(normalizeDevicePath(remotePath))}`;
   return ["-s", serial, "exec-out", "sh", "-c", command];
@@ -198,6 +207,10 @@ export class DeviceFileManager {
 
   async pull(serial: string, remotePath: string, localDirectory: string): Promise<void> {
     await this.run(buildPullFileArgs(serial, remotePath, localDirectory), 5 * 60_000);
+  }
+
+  async pullFileTo(serial: string, remotePath: string, localFilePath: string): Promise<void> {
+    await this.run(buildPullFileToArgs(serial, remotePath, localFilePath), 5 * 60_000);
   }
 
   readFile(serial: string, remotePath: string): Promise<Buffer> {

@@ -31,9 +31,13 @@ import type {
   LocalFile,
   LogcatBuffer,
   MirrorControlInput,
+  MirrorQualityPreset,
   ThemeMode
 } from "../shared/types";
-import { LOGCAT_BUFFERS } from "../shared/types";
+import {
+  LOGCAT_BUFFERS,
+  normalizeMirrorQualityPreset
+} from "../shared/types";
 import { AdbClient, ApkInstallError, findLocalSubnetMatch } from "./adb";
 import type { LocalIpv4Interface } from "./adb";
 import { readApkPackageName } from "./apk-manifest";
@@ -55,7 +59,7 @@ import {
   CAPTURE_MEDIA_SCHEME,
   CaptureMediaStore
 } from "./capture-media-store";
-import { detectImageMime, DeviceFileManager } from "./device-files";
+import { detectImageMime, DeviceFileManager, normalizeDevicePath } from "./device-files";
 import { findGeneratedBugreport } from "./bugreport-files";
 import { DeviceInfoCollector } from "./device-info";
 import { ScreenRecorder } from "./screen-recorder";
@@ -113,7 +117,9 @@ const embeddedMirror = new EmbeddedMirrorManager(
         window.webContents.send("mirror:event", event);
       }
     }
-  }
+  },
+  // 画质档位从持久化设置读取，start() 每次连接按当前档位编码
+  () => settings.getMirrorQuality()
 );
 const terminal = new TerminalManager(resolveAdbPath(), (event) => {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -274,6 +280,21 @@ function isMirrorControlInput(input: unknown): input is MirrorControlInput {
   if (value.type === "back") {
     return true;
   }
+  if (value.type === "key") {
+    return (
+      typeof value.keyCode === "number" &&
+      Number.isInteger(value.keyCode) &&
+      value.keyCode >= 0 &&
+      value.keyCode <= 0xffff
+    );
+  }
+  if (value.type === "text") {
+    return (
+      typeof value.text === "string" &&
+      value.text.length > 0 &&
+      value.text.length <= 2_000
+    );
+  }
   if (value.type === "scroll") {
     return (
       isFiniteNumber(value.x) &&
@@ -300,6 +321,12 @@ function resultFromError(error: unknown): ActionResult {
     ok: false,
     message: error instanceof Error ? error.message : String(error)
   };
+}
+
+function mirrorQualityLabel(preset: MirrorQualityPreset): string {
+  if (preset === "smooth") return "流畅";
+  if (preset === "high") return "高清";
+  return "均衡";
 }
 
 function readApkFile(apkPath: string): ApkFile {
@@ -999,6 +1026,65 @@ function registerIpc(): void {
     }
   );
 
+  ipcMain.handle(
+    "mirror:quality-get",
+    (): MirrorQualityPreset => settings.getMirrorQuality()
+  );
+
+  ipcMain.handle(
+    "mirror:quality-set",
+    async (_event, preset: unknown): Promise<ActionResult> => {
+      try {
+        const next = normalizeMirrorQualityPreset(preset);
+        settings.setMirrorQuality(next);
+        // 正在投屏的会话全部按新档位重启（立即销毁，不等宽限期）
+        for (const serial of embeddedMirror.runningSerials()) {
+          await embeddedMirror.restartForQuality(serial);
+        }
+        return {
+          ok: true,
+          message: `画质已切换为 ${mirrorQualityLabel(next)}，投屏已按新档位重连`
+        };
+      } catch (error) {
+        return resultFromError(error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "mirror:always-on-top",
+    async (
+      _event,
+      serial: string,
+      alwaysOnTop: boolean
+    ): Promise<ActionResult> => {
+      try {
+        assertSerial(serial);
+        const window = mirrorWindows.get(serial);
+        if (!window || window.isDestroyed()) {
+          return { ok: false, message: "该设备没有独立投屏窗口" };
+        }
+        window.setAlwaysOnTop(alwaysOnTop, "screen-saver");
+        return { ok: true, message: alwaysOnTop ? "窗口已置顶" : "已取消置顶" };
+      } catch (error) {
+        return resultFromError(error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "mirror:screen-power",
+    async (_event, serial: string, on: boolean): Promise<ActionResult> => {
+      try {
+        assertSerial(serial);
+        await embeddedMirror.setScreenPower(serial, Boolean(on));
+        return { ok: true };
+      } catch (error) {
+        return resultFromError(error);
+      }
+    }
+  );
+
   ipcMain.on(
     "mirror:control",
     (_event, serial: string, input: unknown) => {
@@ -1238,6 +1324,57 @@ function registerIpc(): void {
         assertPackageName(packageName);
         await adb.launchApp(serial, packageName);
         return { ok: true, message: "应用已启动" };
+      } catch (error) {
+        return resultFromError(error);
+      }
+    }
+  );
+
+  // APK 提取备份：从设备 pull APK 到本机（split APK 的 base.apk 单独拉取）
+  ipcMain.handle(
+    "apps:pull-apk",
+    async (
+      event,
+      serial: string,
+      packageName: string,
+      apkPath: string
+    ): Promise<ActionResult> => {
+      try {
+        assertSerial(serial);
+        assertPackageName(packageName);
+        const remotePath = normalizeDevicePath(String(apkPath));
+        if (!remotePath.endsWith(".apk")) {
+          throw new Error("设备端路径不是 APK 文件");
+        }
+        const versionSuffix = "";
+        const options: Electron.SaveDialogOptions = {
+          title: "提取 APK 到本机",
+          defaultPath: path.join(
+            app.getPath("downloads"),
+            `${packageName}${versionSuffix}.apk`
+          ),
+          filters: [{ name: "Android APK", extensions: ["apk"] }]
+        };
+        const parent = dialogParent(event);
+        const result = parent
+          ? await dialog.showSaveDialog(parent, options)
+          : await dialog.showSaveDialog(options);
+        if (result.canceled || !result.filePath) {
+          return { ok: true, cancelled: true };
+        }
+        const destination = path.extname(result.filePath).toLowerCase() === ".apk"
+          ? result.filePath
+          : `${result.filePath}.apk`;
+        await deviceFiles.pullFileTo(serial, remotePath, destination);
+        if (statSync(destination).size === 0) {
+          throw new Error("提取的 APK 文件为空");
+        }
+        shell.showItemInFolder(destination);
+        return {
+          ok: true,
+          message: "APK 提取完成",
+          savedPath: destination
+        };
       } catch (error) {
         return resultFromError(error);
       }

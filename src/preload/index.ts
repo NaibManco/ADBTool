@@ -9,6 +9,7 @@ import type {
   LogcatEvent,
   MirrorControlInput,
   MirrorManagerEvent,
+  MirrorQualityPreset,
   RecordingEndedEvent,
   TerminalEvent,
   ThemeMode
@@ -59,6 +60,8 @@ const api: AndroidToolApi = {
     ipcRenderer.invoke("apps:force-stop", serial, packageName),
   launchApp: (serial: string, packageName: string) =>
     ipcRenderer.invoke("apps:launch", serial, packageName),
+  pullDeviceApk: (serial: string, packageName: string, apkPath: string) =>
+    ipcRenderer.invoke("apps:pull-apk", serial, packageName, apkPath),
   pairWireless: (host: string, port: number, code: string) =>
     ipcRenderer.invoke("adb:pair", host, port, code),
   connectWireless: (host: string, port: number) =>
@@ -114,6 +117,14 @@ const api: AndroidToolApi = {
   sendMirrorControl: (serial: string, input: MirrorControlInput) => {
     ipcRenderer.send("mirror:control", serial, input);
   },
+  getMirrorQuality: () =>
+    ipcRenderer.invoke("mirror:quality-get"),
+  setMirrorQuality: (preset: MirrorQualityPreset) =>
+    ipcRenderer.invoke("mirror:quality-set", preset),
+  setMirrorWindowAlwaysOnTop: (serial: string, alwaysOnTop: boolean) =>
+    ipcRenderer.invoke("mirror:always-on-top", serial, alwaysOnTop),
+  setMirrorScreenPower: (serial: string, on: boolean) =>
+    ipcRenderer.invoke("mirror:screen-power", serial, on),
   startTerminal: (serial: string) =>
     ipcRenderer.invoke("terminal:start", serial),
   stopTerminal: (serial: string) =>

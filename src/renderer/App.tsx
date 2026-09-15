@@ -1,7 +1,9 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type DragEvent as ReactDragEvent,
@@ -35,6 +37,7 @@ import type {
   AndroidDevice,
   CaptureMedia,
   DeviceAction,
+  MirrorQualityPreset,
   ThemeMode
 } from "../shared/types";
 import { useTheme } from "./theme";
@@ -66,6 +69,7 @@ type WorkspaceView = "mirror" | "log" | "terminal";
 // nonce 用于强制重挂载死面板（key 变化才会触发 remount）
 type MirrorEntry = AndroidDevice & { nonce: number };
 const WORKSPACE_VIEW_KEY = "androidDevTool.workspace.view";
+const MIRROR_GRID_KEY = "androidDevTool.workspace.mirrorGrid";
 const VIEW_LABELS: Record<WorkspaceView, string> = {
   mirror: "投屏",
   log: "日志",
@@ -94,6 +98,57 @@ function persistWorkspace(view: WorkspaceView): void {
   }
 }
 
+function readMirrorGrid(): boolean {
+  try {
+    return window.localStorage.getItem(MIRROR_GRID_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function persistMirrorGrid(on: boolean): void {
+  try {
+    window.localStorage.setItem(MIRROR_GRID_KEY, on ? "on" : "off");
+  } catch {
+    // 同上
+  }
+}
+
+// 网格格宽（像素 flex-grow 值）：按设备 serial 记忆，未设置的设备等分
+const MIRROR_GRID_MIN_CELL = 120;
+
+function readMirrorGridSplits(): Record<string, number> {
+  try {
+    const raw = JSON.parse(
+      window.localStorage.getItem(`${MIRROR_GRID_KEY}.splits`) ?? "{}"
+    ) as Record<string, unknown>;
+    const out: Record<string, number> = {};
+    for (const [serial, value] of Object.entries(raw)) {
+      if (
+        typeof value === "number" &&
+        Number.isFinite(value) &&
+        value >= MIRROR_GRID_MIN_CELL
+      ) {
+        out[serial] = value;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function persistMirrorGridSplits(splits: Record<string, number>): void {
+  try {
+    window.localStorage.setItem(
+      `${MIRROR_GRID_KEY}.splits`,
+      JSON.stringify(splits)
+    );
+  } catch {
+    // 存储不可用时边界偏好仅保留在本次会话
+  }
+}
+
 function statusText(state: string): string {
   if (state === "device") return "已连接";
   if (state === "unauthorized") return "等待授权";
@@ -110,11 +165,15 @@ export function formatRecordingDuration(totalSeconds: number): string {
 
 export function SettingsPanel({
   theme,
+  quality,
   onThemeChange,
+  onQualityChange,
   onClose
 }: {
   theme: ThemeMode;
+  quality: MirrorQualityPreset;
   onThemeChange: (theme: ThemeMode) => void;
+  onQualityChange: (preset: MirrorQualityPreset) => void;
   onClose: () => void;
 }) {
   const choices: Array<{
@@ -131,6 +190,28 @@ export function SettingsPanel({
       value: "light",
       title: "浅色模式",
       description: "提高明亮环境下的界面对比度"
+    }
+  ];
+
+  const qualityChoices: Array<{
+    value: MirrorQualityPreset;
+    title: string;
+    description: string;
+  }> = [
+    {
+      value: "smooth",
+      title: "流畅",
+      description: "2 Mbps · 1024px · 30fps，弱网与低端设备首选"
+    },
+    {
+      value: "balanced",
+      title: "均衡",
+      description: "8 Mbps · 1600px，日常调试默认档"
+    },
+    {
+      value: "high",
+      title: "高清",
+      description: "16 Mbps · 原始分辨率，看细节与 UI 走查用"
     }
   ];
 
@@ -179,6 +260,38 @@ export function SettingsPanel({
               );
             })}
           </div>
+        </div>
+
+        <div className="settings-group">
+          <h3>投屏画质</h3>
+          <div className="theme-options" role="radiogroup" aria-label="投屏画质档位">
+            {qualityChoices.map((choice, index) => {
+              const selected = quality === choice.value;
+              // 档位序号（0/1/2）决定点亮柱数：流畅 1 根、均衡 2 根、高清 3 根
+              const barsOn = index + 1;
+              return (
+                <button
+                  key={choice.value}
+                  className={selected ? "theme-option selected" : "theme-option"}
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => onQualityChange(choice.value)}
+                >
+                  <span className="quality-preview">
+                    <i className={barsOn >= 1 ? "on" : ""} />
+                    <i className={barsOn >= 2 ? "on" : ""} />
+                    <i className={barsOn >= 3 ? "on" : ""} />
+                  </span>
+                  <span>
+                    <strong>{choice.title}</strong>
+                    <small>{choice.description}</small>
+                  </span>
+                  <b>{selected ? "✓" : ""}</b>
+                </button>
+              );
+            })}
+          </div>
+          <p className="settings-hint">切换后正在投屏的会话会自动按新档位重连</p>
         </div>
       </section>
     </div>
@@ -458,7 +571,13 @@ function LegacyApp() {
   const [error, setError] = useState<string>();
   const [lastUpdated, setLastUpdated] = useState<Date>();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mirrorQuality, setMirrorQuality] = useState<MirrorQualityPreset>("balanced");
   const { theme, changeTheme } = useTheme();
+
+  const changeMirrorQuality = useCallback(async (next: MirrorQualityPreset) => {
+    setMirrorQuality(next);
+    await window.androidTool.setMirrorQuality(next);
+  }, []);
 
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -627,7 +746,9 @@ function LegacyApp() {
       {settingsOpen && (
         <SettingsPanel
           theme={theme}
+          quality={mirrorQuality}
           onThemeChange={(nextTheme) => void changeTheme(nextTheme)}
+          onQualityChange={(next) => void changeMirrorQuality(next)}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -648,6 +769,10 @@ export function App() {
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() =>
     readWorkspaceView()
   );
+  const [mirrorGrid, setMirrorGrid] = useState(() => readMirrorGrid());
+  const [mirrorGridSplits, setMirrorGridSplits] = useState<
+    Record<string, number>
+  >(() => readMirrorGridSplits());
   const [loading, setLoading] = useState(true);
   const [busySerial, setBusySerial] = useState<string>();
   const [error, setError] = useState<string>();
@@ -657,6 +782,7 @@ export function App() {
   const [recordingStarts, setRecordingStarts] = useState<Map<string, number>>(new Map());
   const [recordingNow, setRecordingNow] = useState(Date.now());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mirrorQuality, setMirrorQuality] = useState<MirrorQualityPreset>("balanced");
   const [wirelessOpen, setWirelessOpen] = useState(false);
   const [apkOpen, setApkOpen] = useState(false);
   const [droppedApk, setDroppedApk] = useState<ReturnType<typeof fileFromDrop>>();
@@ -665,6 +791,21 @@ export function App() {
   const [draggingApk, setDraggingApk] = useState(false);
   const [copiedError, setCopiedError] = useState(false);
   const { theme, changeTheme } = useTheme();
+
+  useEffect(() => {
+    void window.androidTool.getMirrorQuality().then(setMirrorQuality);
+  }, []);
+
+  const changeMirrorQuality = useCallback(
+    async (next: MirrorQualityPreset) => {
+      setMirrorQuality(next);
+      const result = await window.androidTool.setMirrorQuality(next);
+      if (!result.ok) {
+        setMirrorQuality(await window.androidTool.getMirrorQuality());
+      }
+    },
+    []
+  );
 
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -736,9 +877,9 @@ export function App() {
     void window.androidTool.listScreenRecordings()
       .then((sessions) => {
         setRecordingSerials(new Set(sessions.map((session) => session.serial)));
-        setRecordingStarts(new Map(
-          sessions.map((session) => [session.serial, session.startedAt])
-        ));
+        setRecordingStarts(
+          new Map(sessions.map((session) => [session.serial, session.startedAt]))
+        );
       })
       .catch(() => undefined);
   }, []);
@@ -1061,6 +1202,42 @@ export function App() {
     }
   }
 
+  // 网格格间边界拖动：改相邻两格的像素宽度（flex-grow），按 serial 持久化
+  const mirrorGridSplitsRef = useRef(mirrorGridSplits);
+  mirrorGridSplitsRef.current = mirrorGridSplits;
+
+  function beginGridSplitResize(
+    event: ReactPointerEvent<HTMLDivElement>,
+    rightIndex: number
+  ): void {
+    event.preventDefault();
+    const left = mirrorDevices[rightIndex - 1];
+    const right = mirrorDevices[rightIndex];
+    if (!left || !right) return;
+    const cells = document.querySelectorAll<HTMLElement>(".mirror-grid-cell");
+    const leftCell = cells[rightIndex - 1];
+    const rightCell = cells[rightIndex];
+    if (!leftCell || !rightCell) return;
+    const startX = event.clientX;
+    const startLeft = leftCell.getBoundingClientRect().width;
+    const startRight = rightCell.getBoundingClientRect().width;
+    const onMove = (moveEvent: PointerEvent) => {
+      const delta = moveEvent.clientX - startX;
+      setMirrorGridSplits({
+        ...mirrorGridSplitsRef.current,
+        [left.serial]: Math.max(MIRROR_GRID_MIN_CELL, startLeft + delta),
+        [right.serial]: Math.max(MIRROR_GRID_MIN_CELL, startRight - delta)
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      persistMirrorGridSplits(mirrorGridSplitsRef.current);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
   const workbenchStyle = {
     "--rail-width": railCollapsed ? "60px" : `${railWidth}px`
   } as CSSProperties;
@@ -1342,19 +1519,69 @@ export function App() {
                           {deviceName(device)}
                         </button>
                       ))}
+                      {mirrorDevices.length > 1 && (
+                        <button
+                          className={mirrorGrid ? "mirror-grid-toggle on" : "mirror-grid-toggle"}
+                          onClick={() => {
+                            const next = !mirrorGrid;
+                            setMirrorGrid(next);
+                            persistMirrorGrid(next);
+                          }}
+                          title={mirrorGrid ? "切回单设备大画面" : "多设备同屏网格"}
+                        >
+                          {mirrorGrid ? "单屏" : "网格"}
+                        </button>
+                      )}
                     </div>
-                    <div className="mirror-stage">
-                      {mirrorDevices.map((device) => (
-                        <MirrorPane
-                          key={`${device.serial}:${device.nonce}`}
-                          device={device}
-                          active={
-                            device.serial === activeMirrorSerial &&
-                            effectiveView === "mirror"
-                          }
-                          onMirrorWindow={() => toggleMirrorWindow(device)}
-                          onClose={() => closeMirror(device.serial)}
-                        />
+                    <div
+                      className={
+                        mirrorGrid ? "mirror-stage grid" : "mirror-stage"
+                      }
+                    >
+                      {mirrorDevices.map((device, index) => (
+                        <Fragment key={`${device.serial}:${device.nonce}`}>
+                          {mirrorGrid && index > 0 && (
+                            <div
+                              className="mirror-grid-divider"
+                              role="separator"
+                              aria-orientation="vertical"
+                              aria-label="调整相邻投屏画面的边界"
+                              title="拖动调整两格画面的边界"
+                              onPointerDown={(event) =>
+                                beginGridSplitResize(event, index)
+                              }
+                            />
+                          )}
+                          {mirrorGrid ? (
+                            <div
+                              className="mirror-grid-cell"
+                              style={{
+                                flexGrow: mirrorGridSplits[device.serial] ?? 1
+                              }}
+                            >
+                              <MirrorPane
+                                device={device}
+                                active={
+                                  mirrorGrid ||
+                                  (device.serial === activeMirrorSerial &&
+                                    effectiveView === "mirror")
+                                }
+                                onMirrorWindow={() => toggleMirrorWindow(device)}
+                                onClose={() => closeMirror(device.serial)}
+                              />
+                            </div>
+                          ) : (
+                            <MirrorPane
+                              device={device}
+                              active={
+                                device.serial === activeMirrorSerial &&
+                                effectiveView === "mirror"
+                              }
+                              onMirrorWindow={() => toggleMirrorWindow(device)}
+                              onClose={() => closeMirror(device.serial)}
+                            />
+                          )}
+                        </Fragment>
                       ))}
                     </div>
                   </div>
@@ -1438,7 +1665,9 @@ export function App() {
       {settingsOpen && (
         <SettingsPanel
           theme={theme}
+          quality={mirrorQuality}
           onThemeChange={(nextTheme) => void changeTheme(nextTheme)}
+          onQualityChange={(next) => void changeMirrorQuality(next)}
           onClose={() => setSettingsOpen(false)}
         />
       )}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowClockwise,
   DeviceMobile,
+  DownloadSimple,
   MagnifyingGlass,
   Package,
   Play,
@@ -49,7 +50,7 @@ export function AppManager({
   const [query, setQuery] = useState("");
   const [loadingApps, setLoadingApps] = useState(initialApps === undefined);
   const [loadingDetails, setLoadingDetails] = useState(false);
-  const [operating, setOperating] = useState<"launch" | "clear" | "stop" | "uninstall">();
+  const [operating, setOperating] = useState<"launch" | "clear" | "stop" | "uninstall" | "pull-apk">();
   const [status, setStatus] = useState<ActionResult>();
 
   useEffect(() => {
@@ -121,7 +122,7 @@ export function AppManager({
   const selectedApp = apps.find((app) => app.packageName === selectedPackage);
 
   async function performAction(
-    action: "launch" | "clear" | "stop" | "uninstall",
+    action: "launch" | "clear" | "stop" | "uninstall" | "pull-apk",
     operation: () => Promise<ActionResult>
   ): Promise<void> {
     setOperating(action);
@@ -180,6 +181,18 @@ export function AppManager({
     )) return;
     void performAction("stop", () =>
       window.androidTool.forceStopApp(serial, selectedPackage)
+    );
+  }
+
+  // 提取 APK 备份：把设备端已安装的 base.apk 拉回本机
+  function pullApk(): void {
+    if (!selectedPackage || !serial || !selectedApp) return;
+    void performAction("pull-apk", () =>
+      window.androidTool.pullDeviceApk(
+        serial,
+        selectedPackage,
+        selectedApp.apkPath
+      )
     );
   }
 
@@ -317,6 +330,15 @@ export function AppManager({
 
                   <footer className="app-manager-actions">
                     <span><Warning size={14} /> 请确认当前设备和应用</span>
+                    <button
+                      className="app-pull-apk-button"
+                      disabled={Boolean(operating)}
+                      onClick={pullApk}
+                      title="把设备上的 APK 拉回本机备份"
+                    >
+                      <DownloadSimple size={15} />
+                      {operating === "pull-apk" ? "正在提取…" : "提取 APK"}
+                    </button>
                     <button
                       className="app-launch-button"
                       disabled={Boolean(operating)}

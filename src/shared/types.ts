@@ -160,6 +160,30 @@ export interface DeviceImagePreview {
 
 export type ThemeMode = "dark" | "light";
 
+/** 投屏画质档位（码率/分辨率/帧率组合） */
+export type MirrorQualityPreset = "smooth" | "balanced" | "high";
+
+export interface MirrorQualityOptions {
+  videoBitRate: number;
+  maxSize: number;
+  maxFps: number;
+}
+
+export const MIRROR_QUALITY_PRESETS: Record<
+  MirrorQualityPreset,
+  MirrorQualityOptions
+> = {
+  smooth: { videoBitRate: 2_000_000, maxSize: 1024, maxFps: 30 },
+  balanced: { videoBitRate: 8_000_000, maxSize: 1600, maxFps: 0 },
+  high: { videoBitRate: 16_000_000, maxSize: 0, maxFps: 0 }
+};
+
+export function normalizeMirrorQualityPreset(
+  value: unknown
+): MirrorQualityPreset {
+  return value === "smooth" || value === "high" ? value : "balanced";
+}
+
 export type LogcatLevel = "V" | "D" | "I" | "W" | "E" | "F";
 
 export type LogcatBuffer = "main" | "system" | "crash" | "radio" | "events";
@@ -214,6 +238,8 @@ export type MirrorManagerEvent =
       serial: string;
       running: boolean;
       message?: string;
+      /** quality-change：画质切换的瞬断，观众不应当作会话终止（如独立窗口自动关窗） */
+      reason?: "quality-change";
     };
 
 export type MirrorControlInput =
@@ -231,7 +257,9 @@ export type MirrorControlInput =
       scrollX: number;
       scrollY: number;
     }
-  | { type: "back" };
+  | { type: "back" }
+  | { type: "key"; keyCode: number }
+  | { type: "text"; text: string };
 
 export type TerminalEvent =
   | {
@@ -362,6 +390,7 @@ export interface AndroidToolApi {
   uninstallApp(serial: string, packageName: string): Promise<ActionResult>;
   forceStopApp(serial: string, packageName: string): Promise<ActionResult>;
   launchApp(serial: string, packageName: string): Promise<ActionResult>;
+  pullDeviceApk(serial: string, packageName: string, apkPath: string): Promise<ActionResult>;
   pairWireless(host: string, port: number, code: string): Promise<ActionResult>;
   connectWireless(host: string, port: number): Promise<ActionResult>;
   connectWirelessViaUsb(serial: string): Promise<ActionResult>;
@@ -388,6 +417,10 @@ export interface AndroidToolApi {
   startEmbeddedMirror(serial: string): Promise<ActionResult>;
   stopEmbeddedMirror(serial: string): Promise<ActionResult>;
   sendMirrorControl(serial: string, input: MirrorControlInput): void;
+  getMirrorQuality(): Promise<MirrorQualityPreset>;
+  setMirrorQuality(preset: MirrorQualityPreset): Promise<ActionResult>;
+  setMirrorWindowAlwaysOnTop(serial: string, alwaysOnTop: boolean): Promise<ActionResult>;
+  setMirrorScreenPower(serial: string, on: boolean): Promise<ActionResult>;
   startTerminal(serial: string): Promise<ActionResult>;
   stopTerminal(serial: string): Promise<ActionResult>;
   sendTerminalInput(serial: string, data: string): void;

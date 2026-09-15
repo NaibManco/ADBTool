@@ -1121,6 +1121,50 @@ footer b {
   background: #e5eaed;
 }
 
+/* 画质档位预览：三档以柱数示意清晰度，按档位点亮 1/2/3 根 */
+.quality-preview {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  width: 62px;
+  height: 40px;
+  padding: 8px 10px;
+  border: 1px solid #34434a;
+  border-radius: 6px;
+  background: #0a1015;
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.quality-preview i {
+  display: block;
+  height: 100%;
+  border-radius: 1px;
+  background: #243139;
+}
+
+.quality-preview i.on {
+  background: #48d6b7;
+}
+
+.settings-hint {
+  margin: 8px 0 0;
+  color: #71828a;
+  font-size: 11px;
+}
+
+:root[data-theme="light"] .quality-preview {
+  border-color: #c8d2d7;
+  background: #f7f9fa;
+}
+
+:root[data-theme="light"] .quality-preview i {
+  background: #cbd5d9;
+}
+
+:root[data-theme="light"] .quality-preview i.on {
+  background: #16a37f;
+}
+
 .logcat-overlay {
   position: fixed;
   z-index: 100;
@@ -5890,11 +5934,72 @@ footer b {
   background: #0d161c;
 }
 
+/* 网格模式开关（右对齐顶在 tab 行末尾） */
+.mirror-grid-toggle {
+  margin-left: auto;
+  padding: 7px 12px;
+  color: #73858e;
+  border: 1px solid #293840;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: #0c1419;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.mirror-grid-toggle.on {
+  color: #62dfc3;
+  border-color: #306a5c;
+}
+
+:root[data-theme="light"] .mirror-grid-toggle {
+  color: #5a6d76;
+  border-color: #c4d2d7;
+  background: #f6f9fa;
+}
+
+:root[data-theme="light"] .mirror-grid-toggle.on {
+  color: #0e8570;
+  border-color: #9fd9cc;
+}
+
 .mirror-stage {
   display: flex;
   flex: 1;
   min-height: 0;
   padding: 0 14px 12px;
+}
+
+/* 多设备同屏网格：进入即等分铺满一行，格间分隔条拖动单独调整相邻格边界 */
+.mirror-stage.grid {
+  display: flex;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.mirror-grid-cell {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.mirror-grid-divider {
+  flex: 0 0 9px;
+  margin: 0 -3px;
+  z-index: 5;
+  border-radius: 5px;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.mirror-grid-divider:hover {
+  background: rgba(47, 122, 103, 0.4);
+}
+
+:root[data-theme="light"] .mirror-grid-divider:hover {
+  background: rgba(22, 163, 127, 0.28);
 }
 
 .mirror-pane {
@@ -5965,6 +6070,67 @@ footer b {
   border-color: #306a5c;
 }
 
+/* 息屏/置顶等投屏工具按钮（内嵌面板 header 与独立窗口浮动条共用） */
+.mirror-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: #73858e;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.mirror-tool:hover:not(:disabled) {
+  color: #dce6e8;
+  border-color: #2c3d46;
+}
+
+.mirror-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mirror-tool.on {
+  color: #62dfc3;
+  border-color: #306a5c;
+}
+
+/* 独立投屏窗口右上角浮动工具条（hover 渐显，不遮挡画面操作） */
+.mirror-window-tools {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 10;
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid #1d2b33;
+  border-radius: 8px;
+  background: rgba(7, 12, 16, 0.72);
+  opacity: 0.25;
+  transition: opacity 0.15s ease;
+}
+
+/* 隐形键盘输入框：只负责接收焦点与 IME 组合，不参与视觉 */
+.mirror-keyboard-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mirror-window-host:hover .mirror-window-tools,
+.mirror-window-tools:focus-within {
+  opacity: 1;
+}
+
 .mirror-close {
   color: #73858e;
   border: 0;
@@ -5986,6 +6152,28 @@ footer b {
   overflow: hidden;
   background: #05090d;
   touch-action: none;
+  /* 隐形键盘输入框的定位锚点：IME 候选框出现在画面区域内 */
+  position: relative;
+}
+
+/* canvas 专用容器：React 不往里渲染，解码 effect 直接管理其子节点 */
+.mirror-canvas-host {
+  display: flex;
+  flex: 1;
+  /* 父容器 align-items:center 会让本容器收缩成内容高（canvas 原始像素高），
+     canvas 的 max-height:100% 对 auto 高度包含块失效 → 手机竖屏画面被裁；
+     stretch 撑满父容器给出确定尺寸，canvas 百分比等比缩放恢复生效 */
+  align-self: stretch;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 键盘注入需要面板可聚焦：焦点圈提示当前输入会进设备 */
+.mirror-host:focus-visible {
+  outline: 1px solid #2f7a67;
+  outline-offset: -2px;
 }
 
 .mirror-canvas {
@@ -5995,6 +6183,8 @@ footer b {
 }
 
 .mirror-empty {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
   align-content: center;
@@ -6034,6 +6224,13 @@ footer b {
   min-height: 0;
   overflow: hidden;
   touch-action: none;
+  position: relative;
+}
+
+/* 独立窗口同样支持键盘注入，焦点圈提示 */
+.mirror-window-host:focus-visible {
+  outline: 1px solid #2f7a67;
+  outline-offset: -2px;
 }
 
 .mirror-window-host .mirror-canvas {
@@ -6107,6 +6304,25 @@ footer b {
 
 :root[data-theme="light"] .mirror-host {
   background: #eef3f5;
+}
+
+:root[data-theme="light"] .mirror-tool {
+  color: #5a6d76;
+}
+
+:root[data-theme="light"] .mirror-tool:hover:not(:disabled) {
+  color: #22333c;
+  border-color: #c4d2d7;
+}
+
+:root[data-theme="light"] .mirror-tool.on {
+  color: #0e8570;
+  border-color: #9fd9cc;
+}
+
+:root[data-theme="light"] .mirror-window-tools {
+  border-color: #d3dee2;
+  background: rgba(255, 255, 255, 0.82);
 }
 
 :root[data-theme="light"] .terminal-pane {
@@ -6912,6 +7128,18 @@ footer b {
   color: #7fe7c8;
   border: 1px solid #2d6759;
   background: #112a24;
+}
+
+.app-pull-apk-button {
+  color: #9fc2dd;
+  border: 1px solid #33546b;
+  background: #10222e;
+}
+
+:root[data-theme="light"] .app-pull-apk-button {
+  color: #23628a;
+  border-color: #b3d2e2;
+  background: #ecf5fa;
 }
 
 :root[data-theme="light"] .app-launch-button {

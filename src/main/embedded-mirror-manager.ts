@@ -2,7 +2,12 @@ import { execFile as execFileCallback } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import type { WebContents } from "electron";
-import type { MirrorControlInput, MirrorManagerEvent } from "../shared/types";
+import {
+  MIRROR_QUALITY_PRESETS,
+  type MirrorControlInput,
+  type MirrorManagerEvent,
+  type MirrorQualityPreset
+} from "../shared/types";
 
 // @yume-chan 包是 ESM-only；主进程是 CommonJS 输出。
 // Electron 内嵌 Node >= 22.12 支持 require(esm)，这里用 require 加载、
@@ -19,9 +24,19 @@ const {
   AndroidKeyCode
 } = require("@yume-chan/scrcpy") as typeof import("@yume-chan/scrcpy");
 
+// AndroidKeyCode 命名空间下每项都是字面量类型，联合即其取值集合；
+// 渲染端传来的动态键码断言进该联合
+type AndroidKeyCodeType = (typeof AndroidKeyCode)[keyof typeof AndroidKeyCode];
+
 const execFileAsync = promisify(execFileCallback);
 const SCRCPY_SERVER_DEVICE_PATH = "/data/local/tmp/scrcpy-server.jar";
 const OUTPUT_TAIL_LINES = 30;
+
+type MirrorQualityOptionsValue = {
+  videoBitRate: number;
+  maxSize: number;
+  maxFps: number;
+};
 
 type MirrorSession = {
   client: InstanceType<typeof AdbScrcpyClient>;
@@ -57,6 +72,8 @@ export class EmbeddedMirrorManager {
   private readonly starting = new Set<string>();
   private readonly stopRequested = new Set<string>();
   private readonly pendingStops = new Map<string, NodeJS.Timeout>();
+  // 画质切换的挂起重连：等待设备编码器释放后自动重启会话
+  private readonly pendingRestarts = new Map<string, NodeJS.Timeout>();
   private serverClient?: InstanceType<typeof AdbServerNodeJsClient>;
   private serverBytes?: Promise<Uint8Array>;
 
@@ -66,11 +83,70 @@ export class EmbeddedMirrorManager {
     private readonly onEvent: (
       event: MirrorManagerEvent,
       target?: WebContents
-    ) => void
+    ) => void,
+    private readonly getQuality: () => MirrorQualityPreset = () => "balanced"
   ) {}
 
   isRunning(serial: string): boolean {
     return this.sessions.has(serial);
+  }
+
+  /** 全部活跃会话的序列号（画质切换时逐个重启用）。 */
+  runningSerials(): string[] {
+    return [...this.sessions.keys()];
+  }
+
+  /** 当前画质档位对应的 scrcpy 编码参数。 */
+  private qualityOptions(): MirrorQualityOptionsValue {
+    return MIRROR_QUALITY_PRESETS[this.getQuality()] ?? MIRROR_QUALITY_PRESETS.balanced;
+  }
+
+  /** 投屏中切换画质：立即销毁会话（不等宽限期），标记瞬断并自动重连。 */
+  async restartForQuality(serial: string): Promise<void> {
+    const pendingStop = this.pendingStops.get(serial);
+    if (pendingStop) {
+      clearTimeout(pendingStop);
+      this.pendingStops.delete(serial);
+    }
+    const session = this.sessions.get(serial);
+    if (!session) return;
+    this.sessions.delete(serial);
+    await session.client.close().catch(() => undefined);
+    // 观众（独立窗口）收到该事件不能走"运行过即关窗"路径；
+    // 重连由这里统一调度，观众只管等新的 meta/status
+    this.onEvent({
+      type: "status",
+      serial,
+      running: false,
+      message: "正在按新画质重连…",
+      reason: "quality-change"
+    });
+    // 眼镜等设备的编码器被活跃会话占用后立即重启会卡死等首帧：
+    // 延迟 800ms 再重连，给设备端 server 进程退出留出时间
+    this.scheduleRestart(serial, 800);
+  }
+
+  private scheduleRestart(serial: string, delayMs: number): void {
+    const existing = this.pendingRestarts.get(serial);
+    if (existing) clearTimeout(existing);
+    this.pendingRestarts.set(
+      serial,
+      setTimeout(() => {
+        this.pendingRestarts.delete(serial);
+        // 观众已全部离开则不重启，会话保持停止
+        this.start(serial).catch(() => undefined);
+      }, delayMs)
+    );
+  }
+
+  /** 设备息屏/亮屏（画面继续编码推流，眼镜长时间投屏省电降温用）。 */
+  async setScreenPower(serial: string, on: boolean): Promise<void> {
+    const session = this.sessions.get(serial);
+    const controller = session?.client.controller;
+    if (!session || !controller) {
+      throw new Error("该设备当前没有活跃投屏会话");
+    }
+    await controller.setDisplayPower(on);
   }
 
   /** 当前会话的视频尺寸（session 包到达后有效）；供独立窗口按比例自适应。 */
@@ -83,6 +159,12 @@ export class EmbeddedMirrorManager {
   }
 
   async start(serial: string, target?: WebContents): Promise<void> {
+    // 观众主动接入：画质挂起重连不再需要（马上就正常 start 了）
+    const pendingRestart = this.pendingRestarts.get(serial);
+    if (pendingRestart) {
+      clearTimeout(pendingRestart);
+      this.pendingRestarts.delete(serial);
+    }
     // 宽限期内有人接入：撤销挂起的销毁，走下面的 resync 路径接上
     const pendingStop = this.pendingStops.get(serial);
     if (pendingStop) {
@@ -173,13 +255,15 @@ export class EmbeddedMirrorManager {
       }) as unknown as Parameters<typeof AdbScrcpyClient.pushServer>[1];
       await AdbScrcpyClient.pushServer(adb, serverStream);
 
+      const quality = this.qualityOptions();
       const options = new AdbScrcpyOptions4_0({
         audio: false,
         control: true,
         tunnelForward: true,
         videoCodec: "h264",
-        videoBitRate: 8_000_000,
-        maxSize: 1600,
+        videoBitRate: quality.videoBitRate,
+        maxSize: quality.maxSize,
+        maxFps: quality.maxFps,
         // 关键帧间隔压到 2s（默认 10s）：内嵌↔独立窗口切换时新观众接入
         // 同一活跃会话，最坏 2s 内拿到 IDR 出画，不用等满一个长 GOP
         videoCodecOptions: "i-frame-interval=2"
@@ -343,6 +427,12 @@ export class EmbeddedMirrorManager {
   }
 
   async stop(serial: string): Promise<boolean> {
+    // 观众明确停止：画质挂起重连作废
+    const pendingRestart = this.pendingRestarts.get(serial);
+    if (pendingRestart) {
+      clearTimeout(pendingRestart);
+      this.pendingRestarts.delete(serial);
+    }
     const session = this.sessions.get(serial);
     if (!session) {
       // start 尚未完成：登记请求，由 start() 在注册会话前处理
@@ -375,6 +465,11 @@ export class EmbeddedMirrorManager {
       clearTimeout(pendingStop);
       this.pendingStops.delete(serial);
     }
+    const pendingRestart = this.pendingRestarts.get(serial);
+    if (pendingRestart) {
+      clearTimeout(pendingRestart);
+      this.pendingRestarts.delete(serial);
+    }
     await session.client.close().catch(() => undefined);
     this.onEvent({
       type: "status",
@@ -385,6 +480,11 @@ export class EmbeddedMirrorManager {
   }
 
   async stopAll(): Promise<void> {
+    for (const serial of [...this.pendingRestarts.keys()]) {
+      const timer = this.pendingRestarts.get(serial);
+      clearTimeout(timer);
+      this.pendingRestarts.delete(serial);
+    }
     for (const serial of [...this.pendingStops.keys()]) {
       const timer = this.pendingStops.get(serial);
       clearTimeout(timer);
@@ -427,6 +527,50 @@ export class EmbeddedMirrorManager {
           metaState: 0
         })
       );
+      return;
+    }
+
+    // 键盘单键注入（回车/退格/方向键等）：Down+Up 成对发送。
+    // AndroidKeyCode 是字面量联合类型，渲染端传来的动态键码做一次断言桥接
+    if (input.type === "key") {
+      if (!Number.isInteger(input.keyCode) || input.keyCode < 0) return;
+      const keyCode = input.keyCode as AndroidKeyCodeType;
+      write(
+        controller.injectKeyCode({
+          action: AndroidKeyEventAction.Down,
+          keyCode,
+          repeat: 0,
+          metaState: 0
+        })
+      );
+      write(
+        controller.injectKeyCode({
+          action: AndroidKeyEventAction.Up,
+          keyCode,
+          repeat: 0,
+          metaState: 0
+        })
+      );
+      return;
+    }
+
+    // 文本注入：ASCII 直接走 injectText；含非 ASCII（中文等）时走
+    // 剪贴板 + 粘贴序列（scrcpy 官方方案，绕开设备输入法对 IME 的依赖）
+    if (input.type === "text") {
+      const text = input.text.slice(0, 2_000);
+      if (!text) return;
+      if (/^[\x00-\x7F]*$/.test(text)) {
+        write(controller.injectText(text));
+      } else {
+        write(
+          controller.setClipboard({
+            content: text,
+            // paste=true 让 server 直接注入粘贴动作，不依赖设备剪贴板轮询
+            paste: true,
+            sequence: 0n
+          })
+        );
+      }
       return;
     }
 

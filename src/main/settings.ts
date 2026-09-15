@@ -1,13 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ThemeMode } from "../shared/types";
+import {
+  normalizeMirrorQualityPreset,
+  type MirrorQualityPreset,
+  type ThemeMode
+} from "../shared/types";
 
 interface AppSettings {
   theme: ThemeMode;
+  mirrorQuality: MirrorQualityPreset;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  theme: "dark"
+  theme: "dark",
+  mirrorQuality: "balanced"
 };
 
 export function normalizeTheme(value: unknown): ThemeMode {
@@ -16,8 +22,14 @@ export function normalizeTheme(value: unknown): ThemeMode {
 
 export function parseSettings(content: string): AppSettings {
   try {
-    const parsed = JSON.parse(content) as { theme?: unknown };
-    return { theme: normalizeTheme(parsed.theme) };
+    const parsed = JSON.parse(content) as {
+      theme?: unknown;
+      mirrorQuality?: unknown;
+    };
+    return {
+      theme: normalizeTheme(parsed.theme),
+      mirrorQuality: normalizeMirrorQualityPreset(parsed.mirrorQuality)
+    };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -34,8 +46,22 @@ export class SettingsStore {
     return this.settings.theme;
   }
 
+  getMirrorQuality(): MirrorQualityPreset {
+    return this.settings.mirrorQuality;
+  }
+
   setTheme(theme: ThemeMode): void {
-    this.settings = { ...this.settings, theme: normalizeTheme(theme) };
+    this.update({ theme: normalizeTheme(theme) });
+  }
+
+  setMirrorQuality(preset: MirrorQualityPreset): void {
+    this.update({
+      mirrorQuality: normalizeMirrorQualityPreset(preset)
+    });
+  }
+
+  private update(patch: Partial<AppSettings>): void {
+    this.settings = { ...this.settings, ...patch };
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     fs.writeFileSync(
       this.filePath,

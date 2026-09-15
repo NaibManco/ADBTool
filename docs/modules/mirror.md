@@ -10,9 +10,11 @@
 
 - `src/main/embedded-mirror-manager.ts` — 会话核心：@yume-chan（scrcpy 4.0）会话管理、视频包广播、控制注入。内嵌面板与独立窗口都是它的消费者。
 - `src/main/main.ts` — `mirrorWindows`（serial → BrowserWindow）：`createMirrorWindow`（420×780 起始，`?view=mirror&serial=&label=`，label 用于窗口标题）、`fitMirrorWindowToVideo`（session 包/活会话弹出时按视频宽高比自适应）、`closeMirrorWindow`（幂等：删表 → close → 停会话）、`mirror:start`/`mirror:stop`/`mirror:embedded-start` handler 的互斥编排。
-- `src/renderer/MirrorPane.tsx` — 内嵌解码面板：WebCodecsVideoDecoder、canvas 挂载、指针/滚轮/右键交互。
-- `src/renderer/MirrorWindow.tsx` — 独立窗口页面：同一套解码/交互逻辑，无面板装饰；会话结束（运行过）立即自动关窗，启动失败展示错误 4 秒后关窗。
+- `src/renderer/MirrorPane.tsx` — 内嵌解码面板：WebCodecsVideoDecoder、canvas 挂载、指针/滚轮/右键交互、键盘注入（隐形输入框）、息屏开关。
+- `src/renderer/MirrorWindow.tsx` — 独立窗口页面：同一套解码/交互逻辑，无面板装饰；右上角浮动工具条（置顶/息屏）；会话结束（运行过）立即自动关窗，启动失败展示错误 4 秒后关窗。
 - `src/renderer/mirror-control.ts` — 纯坐标映射（`normalizedPoint` 归一化钳制、`wheelToScroll` 滚轮方向翻转，-0 已修）。
+- `src/renderer/mirror-keyboard.ts` — 键盘事件 → Android 键码/文本注入的纯映射（修饰键组合留给宿主）。
+- `src/renderer/mirror-keyboard-input.tsx` — 隐形 `<input>`：接焦点与 IME 组合（中文），keydown 拦截控制键、compositionend 提交组合文本。
 - `src/main/paths.ts` — `resolveScrcpyServerPath`（惰性：server 缺失只禁投屏，不阻断应用启动）。
 
 ## 历史：scrcpy.exe 已移除
@@ -47,6 +49,11 @@
 - 画布左键按下/拖动/抬起 = 触摸；**仅左键**（右键/中键不注入）。
 - `pointercancel` 无条件发 touch up（其 `button` 恒为 -1，不能加门禁——否则触摸卡死在按下）。
 - 右键 = 返回键；滚轮 = injectScroll；wheel 用**原生非被动监听**（React onWheel 是 passive，preventDefault 无效）。
+- **键盘注入**（点击画面后）：控制键（回车/退格/Tab/ESC/Delete/Home/End/PageUp/Down/方向键）→ Android 键码 Down+Up；可打印 ASCII 字符 → `injectText`；**中文等非 ASCII** → `setClipboard({content, paste:true})`（scrcpy 官方方案：写设备剪贴板并直接注入粘贴，绕开 IME 依赖，真机已验证 PKB110 手机与 Neo 眼镜均生效）。修饰键组合（Ctrl+C 等）留给宿主应用。实现：隐形 `<input>` 承接焦点与 IME 组合（div 的 keydown 拿不到组合中的中文），compositionend 一次性提交。**焦点陷阱（已修，勿回退）**：宿主 div 的 pointerdown/mousedown 必须双 `preventDefault()`——否则 mousedown 默认动作把焦点从隐形 input 抢回被点击的 div（tabIndex=-1 也可点聚焦），键盘事件全部落空（表现：输入完全无响应）。已用 Electron 离屏 Chromium 验证点击后焦点保留在 input、keydown 正确到达。
+- **息屏投屏**：面板/独立窗口工具条开关 → `controller.setDisplayPower(false/true)`，关屏省电降温（眼镜长时间投屏发热明显），画面继续编码推流。
+- **独立窗口置顶**：浮动工具条（hover 渐显）→ `BrowserWindow.setAlwaysOnTop(level:"screen-saver")`。
+- **画质档位**：设置面板三档（流畅 2Mbps/1024px/30fps · 均衡 8Mbps/1600px · 高清 16Mbps/原始分辨率），持久化在 settings.json。切换时活跃会话立即销毁并广播 `status{running:false, reason:"quality-change"}`（观众不当作会话终止：独立窗口不自动关窗、面板不卸载），800ms 后主进程统一重连（眼镜编码器立即重启会卡死，留出设备端 server 退出时间；时序已在眼镜真机验证：close→800ms→重连 2.6s 出画）。**渲染端收到瞬断必须软重建**（`releasePipeline`：dispose 解码器 + 关包队列 + 重建空队列 + configured 复位）——保活旧解码器会因新会话 pts 归零回退而行为不可预期，且旧 meta 到达被 `decoderRef.current` 守卫吞掉后状态文字永远停在"正在按新画质重连…"；新 meta 到达时在原闭包内全新建管线（包队列必须随之重建，ReadableStream 关闭后不可复用）。
+- **多设备网格**：内嵌投屏区 tab 行"网格"开关（多设备时显示，localStorage 持久化）。网格 = 一行平铺：进入即**等分铺满显示区**（每设备一格 `flex: 1 1 0`），格间**垂直分隔条拖动单独调整相邻两格边界**（按设备 serial 记忆像素宽度，最小 120px，`localStorage [mirrorGrid].splits`）。旧版"全局卡片宽 + 右下角把手"已废弃。单屏模式回到 tab 切换。
 - 面板头部「⇗」弹窗按钮：切到独立投屏窗口并自动关闭内嵌（`toggleMirrorWindow`）。
 
 ## 生命周期竞争（已修，勿回退）
@@ -55,16 +62,18 @@
 - start 半途失败：catch 关闭 client（防设备端 server 进程残留）+ 清 sessions + starting。
 - 隐藏 Tab `decoder.pause()`：内存有界于一个 GOP（≈10MB），pipeTo 持续消费，队列不涨。
 - 面板 `[decoder, active]` 效果里 resume/pause 需 try/catch：停止投屏的事件回调会同步 dispose 解码器，而效果闭包可能还持着旧实例，对已释放实例 resume 会抛 "Attempt to resume a closed decoder" 并炸掉整棵组件树（无 error boundary，整窗白屏）。
+- **canvas 必须挂进专用空容器（`.mirror-canvas-host`），不能 replaceChildren 进 `.mirror-host`**：解码 canvas 是绕过 React 管理的 DOM，若直接替换 host 的子节点，会把 React 渲染的空态占位/键盘输入框一并清掉；之后 `setDecoder` 变化（如画质切换的 null→新实例）触发 React diff 真实 DOM 时参照节点不存在，抛 `insertBefore NotFoundError` 炸掉整棵树（实测：投屏中切清晰度主界面白屏，已修勿回退）。专用容器 React 永不往里渲染，两边互不干扰。
 - 独立窗口 StrictMode 安全性：StrictMode 的 stop 不广播 status:false（`stopRequested` 路径静默），不会误触发自动关窗。
 
 ## 已知边界
 
 - H.265/AV1 未启用（固定 h264，WebCodecs 能力有但未开选项）。
 - 独立窗口 420×780 起始（适合手机竖屏）；视频首个 session 包到达后 `fitMirrorWindowToVideo` 按宽高比自适应内容区（适配 70%×75% 工作区、不放大超过原视频分辨率），首次 fit 居中。同比例重复触发（<5% 偏差）跳过，不与用户手动改窗打架；手机横竖屏切换会重 fit。视频本体始终等比缩放居中（max-width/max-height）。
-- 无键盘输入注入（旧 scrcpy.exe 有；内嵌面板本就没有，为保持一致未做）。需要敲字用终端或真机输入法。
+- 中文输入依赖设备端剪贴板写入（覆盖设备当前剪贴板内容），与剪贴板同步功能（clipboard-sync）共用通道，同设备同时开启时可能互相覆盖——观察到冲突时先关其一。
+- 键盘注入只覆盖单键与直接键入；无组合键（Ctrl+A 等）与 IME 状态同步（设备端输入法如果本身拦截按键，注入照样经过它）。
 - GOP 缓存超限（300 包/8MB，长时间无 IDR 的高码率动态画面）时降级为等线上关键帧，晚接入首帧变慢但不失败。
 - `videoCodecOptions` 用字符串形式 `"i-frame-interval=2"`（@yume-chan/scrcpy 根入口不导出 CodecOptions 类）；部分设备编码器无视该参数，GOP 缓存兜底。
 
 ## 测试
 
-`src/renderer/mirror-control.test.ts`（坐标/滚轮纯函数）。会话与窗口生命周期重依赖真机/Electron，无 mock 单测（testing-policy：平台集成行为在真实环境验证），靠真机手工验证清单。
+`src/renderer/mirror-control.test.ts`（坐标/滚轮纯函数）、`src/renderer/mirror-keyboard.test.ts`（键码/文本/修饰键路由）、`src/main/settings.test.ts`（画质档位持久化回退）。会话与窗口生命周期重依赖真机/Electron，无 mock 单测（testing-policy：平台集成行为在真实环境验证）；键盘/息屏/画质档位链路已用一次性脚本经 yume-chan 直连 PKB110 手机与 Neo 眼镜真机验证（injectText、中文 setClipboard+paste、injectKeyCode、setDisplayPower、流畅档 1024 上限会话均通过）。

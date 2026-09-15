@@ -74,7 +74,9 @@ describe("App", () => {
     const html = renderToStaticMarkup(
       <SettingsPanel
         theme="dark"
+        quality="balanced"
         onThemeChange={() => undefined}
+        onQualityChange={() => undefined}
         onClose={() => undefined}
       />
     );
@@ -84,5 +86,22 @@ describe("App", () => {
     expect(html).toContain("浅色模式");
     expect(html).toContain('aria-checked="true"');
     expect(html).toContain('aria-checked="false"');
+  });
+
+  it("offers mirror quality presets in settings", () => {
+    const html = renderToStaticMarkup(
+      <SettingsPanel
+        theme="dark"
+        quality="balanced"
+        onThemeChange={() => undefined}
+        onQualityChange={() => undefined}
+        onClose={() => undefined}
+      />
+    );
+
+    expect(html).toContain("投屏画质");
+    expect(html).toContain("流畅");
+    expect(html).toContain("均衡");
+    expect(html).toContain("高清");
   });
 });

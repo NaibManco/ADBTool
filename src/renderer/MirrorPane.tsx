@@ -4,11 +4,12 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent
 } from "react";
-import { ArrowSquareOut } from "@phosphor-icons/react";
+import { ArrowSquareOut, Monitor, ShieldWarning } from "@phosphor-icons/react";
 import { WebCodecsVideoDecoder } from "@yume-chan/scrcpy-decoder-webcodecs";
 import type { ScrcpyVideoCodecId } from "@yume-chan/scrcpy";
 import type { AndroidDevice } from "../shared/types";
 import { normalizedPoint, wheelToScroll } from "./mirror-control";
+import { MirrorKeyboardInput } from "./mirror-keyboard-input";
 
 type MirrorDecoder = InstanceType<typeof WebCodecsVideoDecoder>;
 
@@ -50,12 +51,30 @@ export function MirrorPane({
   const [status, setStatus] = useState("正在连接…");
   const [running, setRunning] = useState(false);
   const [decoder, setDecoder] = useState<MirrorDecoder | null>(null);
+  const [screenOff, setScreenOff] = useState(false);
   const externalWindow =
     device.mirroring && !device.mirroringEmbedded;
   const hostRef = useRef<HTMLDivElement>(null);
+  const canvasHostRef = useRef<HTMLDivElement>(null);
+  const keyboardRef = useRef<HTMLInputElement>(null);
   const decoderRef = useRef<MirrorDecoder | null>(null);
   const packetControllerRef =
     useRef<ReadableStreamDefaultController<VideoPacket> | null>(null);
+
+  // 息屏开关：关屏省电（眼镜长时间投屏发热明显），画面继续编码推流
+  async function toggleScreenOff(): Promise<void> {
+    const next = !screenOff;
+    const result = await window.androidTool.setMirrorScreenPower(
+      device.serial,
+      !next
+    );
+    if (result.ok) {
+      setScreenOff(next);
+      setStatus(next ? "设备已息屏（画面仍在投屏）" : "设备屏幕已点亮");
+    } else {
+      setStatus(result.message || "息屏控制失败");
+    }
+  }
 
   useEffect(() => {
     if (!WebCodecsVideoDecoder.isSupported) {
@@ -84,11 +103,25 @@ export function MirrorPane({
     host?.addEventListener("wheel", handleWheel, { passive: false });
 
     // 先建好包队列，meta 到达前到达的视频包也不丢
-    const packets = new ReadableStream<VideoPacket>({
-      start(controller) {
-        packetControllerRef.current = controller;
-      }
-    });
+    const createPackets = (): ReadableStream<VideoPacket> =>
+      new ReadableStream<VideoPacket>({
+        start(controller) {
+          packetControllerRef.current = controller;
+        }
+      });
+    let packets = createPackets();
+
+    // 释放当前解码管线（画质瞬断软重建/真停止共用）；
+    // configured 门控同步复位，等待新会话的 configuration 包
+    const releasePipeline = (): void => {
+      decoderRef.current?.dispose();
+      decoderRef.current = null;
+      setDecoder(null);
+      packetControllerRef.current?.close();
+      packetControllerRef.current = null;
+      packets = createPackets();
+      configured = false;
+    };
 
     // 晚接入观众（页面刷新后面板重开，经 resync 接入活跃会话）可能拿到
     // 先于 configuration 的裸 data 包：解码管道未配置就收到 data 会报错
@@ -120,6 +153,8 @@ export function MirrorPane({
       }
 
       if (event.type === "meta") {
+        // 画质瞬断软清理后 decoderRef 已空，新 meta 在此全新建管线；
+        // 正常运行中的重复 meta（resync）直接忽略
         if (decoderRef.current) return;
         const created = new WebCodecsVideoDecoder({
           codec: event.codec as ScrcpyVideoCodecId
@@ -136,13 +171,13 @@ export function MirrorPane({
 
       setRunning(event.running);
       if (event.message) setStatus(event.message);
+      // 画质切换的瞬断：软清理解码管线等新 meta；重连由主进程调度
+      if (event.reason === "quality-change") {
+        if (!event.running) releasePipeline();
+        return;
+      }
       if (!event.running) {
-        decoderRef.current?.dispose();
-        decoderRef.current = null;
-        setDecoder(null);
-        packetControllerRef.current?.close();
-        packetControllerRef.current = null;
-        configured = false;
+        releasePipeline();
       }
     });
 
@@ -156,20 +191,21 @@ export function MirrorPane({
       host?.removeEventListener("wheel", handleWheel);
       unsubscribe();
       void window.androidTool.stopEmbeddedMirror(device.serial);
-      decoderRef.current?.dispose();
-      decoderRef.current = null;
-      packetControllerRef.current?.close();
-      packetControllerRef.current = null;
+      releasePipeline();
     };
   }, [device.serial]);
 
   // 挂载/切换可见性时把解码画布放进宿主，并按激活状态暂停/恢复解码
   useEffect(() => {
-    const host = hostRef.current;
+    // canvas 只进专用空容器（React 不往里渲染任何节点）：直接 replaceChildren
+    // 进 mirror-host 会清掉 React 管理的子节点（空态/键盘输入框），之后
+    // setDecoder 变化触发 React diff 真实 DOM 时对不上，抛 insertBefore
+    // NotFoundError 炸掉整棵组件树（表现：切画质后主界面白屏）
+    const canvasHost = canvasHostRef.current;
     const canvas = canvasOf(decoder);
-    if (host && canvas && canvas.parentElement !== host) {
+    if (canvasHost && canvas && canvas.parentElement !== canvasHost) {
       canvas.className = "mirror-canvas";
-      host.replaceChildren(canvas);
+      canvasHost.replaceChildren(canvas);
     }
     if (!decoder) return;
     // 停止投屏的事件回调会同步 dispose 解码器，而这里的闭包可能还持着
@@ -221,6 +257,14 @@ export function MirrorPane({
           {status}
         </span>
         <button
+          className={screenOff ? "mirror-tool on" : "mirror-tool"}
+          onClick={() => void toggleScreenOff()}
+          disabled={!running}
+          title={screenOff ? "点亮设备屏幕" : "设备息屏（画面继续投屏）"}
+        >
+          {screenOff ? <ShieldWarning size={14} /> : <Monitor size={14} />}
+        </button>
+        <button
           className={externalWindow ? "mirror-popout on" : "mirror-popout"}
           onClick={() => void onMirrorWindow()}
           title={externalWindow ? "关闭外部投屏窗口" : "弹出独立投屏窗口"}
@@ -234,11 +278,21 @@ export function MirrorPane({
       <div
         className="mirror-host"
         ref={hostRef}
+        tabIndex={-1}
         onPointerDown={(event) => {
           // 仅左键映射为触摸；右键留给"返回"，中键/侧键忽略
           if (event.button !== 0) return;
+          // 阻止 mousedown 默认把焦点抢到本 div：否则 keyboardRef 的焦点
+          // 在同一点击内被覆盖，键盘输入全部落空
+          event.preventDefault();
+          keyboardRef.current?.focus();
           event.currentTarget.setPointerCapture(event.pointerId);
           sendTouch("down", event);
+        }}
+        onMouseDown={(event) => {
+          // 兜底：即使 pointerdown 的取消未抑制默认行为，取消 mousedown
+          // 的焦点默认动作（双保险，两个事件都拦才稳）
+          if (event.button === 0) event.preventDefault();
         }}
         onPointerMove={(event) => {
           if (event.buttons & 1) sendTouch("move", event);
@@ -257,12 +311,15 @@ export function MirrorPane({
           window.androidTool.sendMirrorControl(device.serial, { type: "back" });
         }}
       >
+        {/* canvas 专用空容器：子节点由解码 effect 全权管理，React 不渲染其内容 */}
+        <div className="mirror-canvas-host" ref={canvasHostRef} />
         {!decoder && (
           <div className="mirror-empty">
             <span>&gt;_</span>
             <p>{status}</p>
           </div>
         )}
+        <MirrorKeyboardInput ref={keyboardRef} serial={device.serial} />
       </div>
     </section>
   );
