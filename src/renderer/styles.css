@@ -317,7 +317,7 @@
 .file-manager-toolbar > button,
 .file-detail-actions button,
 .file-image-preview span,
-.app-manager-app-list code,
+.app-manager-app-name strong,
 .app-manager-empty,
 .app-manager-detail-empty,
 .app-manager-no-device,
@@ -4490,9 +4490,35 @@ footer b {
   background: #111a1f;
 }
 
+/* 名称 + 包名两行展示：覆盖上面的图标 span 通用样式 */
+.app-manager-app-list > button > span.app-manager-app-name {
+  display: flex;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.app-manager-app-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .app-manager-app-list > button.selected > span {
   border-color: #2c6457;
   background: #142c25;
+}
+
+/* 选中高亮只染图标框和整行，名称区保持透明 */
+.app-manager-app-list > button.selected > span.app-manager-app-name {
+  border: 0;
+  background: none;
 }
 
 .app-manager-app-list code {

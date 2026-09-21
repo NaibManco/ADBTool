@@ -4,11 +4,12 @@
 
 ## 职责
 
-adb 可执行文件解析、设备发现轮询、按键/重启等设备控制命令、应用启动、无线调试连接（pair/connect/tcpip）、应用进程列表。
+adb 可执行文件解析、设备发现轮询、按键/重启等设备控制命令、应用启动、应用显示名解析、无线调试连接（pair/connect/tcpip）、应用进程列表。
 
 ## 文件
 
 - `src/main/adb.ts` — `AdbClient`：所有一次性 adb 命令（execFile + 参数数组，显式 `-s <serial>`）。导出纯函数 `buildXxxArgs` 家族（键事件/音量/重启/安装/卸载/清数据/force-stop/启动应用/清 logcat 缓冲/bugreport/pair/connect/tcpip 等）与解析函数（`parseAdbDevices`、`parseInstallFailure`、`parseRunningAppProcesses`、`parsePairResult`/`parseConnectResult`/`parseDeviceIpv4Addresses` 等，后三者返回 `WirelessResult{ok, message}` 中文归因）。
+- `src/main/app-label.ts` — 应用显示名离线解析：`parseManifestAppLabel`（AXML `<application android:label>`，字面量或资源引用）+ `resolveArscString`（resources.arsc 资源 ID → 默认 config 字符串，dense/sparse 偏移表均支持）。纯函数，失败一律返回 undefined 降级为包名。
 - `src/main/paths.ts` — 可执行文件解析：`resolveAdbPath`（内置 resources → env → SDK → PATH），同样导出 `buildAdbCandidates` 等纯函数供测试。
 
 ## 关键命令构造（纯函数，均有单测）
@@ -21,6 +22,7 @@ adb 可执行文件解析、设备发现轮询、按键/重启等设备控制命
 - **连接失败网段诊断**（main.ts `withSubnetDiagnosis` + adb.ts `findLocalSubnetMatch`）：目标 IPv4 不落在任何本机网卡子网时，附加「设备 X 不在本机任何网段（本机 IPv4：…）」指引。真机案例：手机 wlan0 在 192.168.137.x、电脑只有 172.16.x/10.41.x，TCP 层不可达、重试必然超时——ColorOS 并不封 5555（adbd 照常 `tcp6 [::]:5555 LISTEN`），先查两边是否同网段再怀疑设备。
 - 设备 IP：`shell ip -o -4 addr show scope global`，`parseDeviceIpv4Addresses` **wlan 接口优先**排序（真机上 rmnet/vgate 等虚拟接口也会出现）。
 - 进程列表：并行 `dumpsys activity activities` + `ps -A -o PID,NAME` + `pm list packages`，`parseRunningAppProcesses` 合成 `{pid, processName, packageName, foreground}`（前台优先排序）。
+- **应用显示名**（`apps:labels` IPC ← `AdbClient.getManagedAppLabels`）：设备端 `exec-out unzip -p <apk> AndroidManifest.xml`（label 多为资源引用如 `0x7f1103d8`，引用时再取 `resources.arsc` 本地解析）。APK 路径来自 `pm list packages -f`，经 `DEVICE_APK_PATH_PATTERN`（`^\/[A-Za-z0-9._~/=-]+$`）白名单校验后才进命令。并发 8 逐应用解析（真机 65 应用约 10s，渲染层后台填充）；`readDeviceApkEntry` 用 `encoding: "buffer"` 走二进制通道，超时 60s、maxBuffer 64MB（Edge 的 arsc 实测 33.5MB）。单个应用失败只降级为包名。设备无 `unzip` 时（真机两台均有，`/system/bin/unzip`）整体降级。
 
 ## 设备状态流
 
@@ -37,4 +39,4 @@ adb 可执行文件解析、设备发现轮询、按键/重启等设备控制命
 
 ## 测试
 
-`src/main/adb.test.ts`（全部 buildXxxArgs/解析纯函数）、`src/main/paths.test.ts`。
+`src/main/adb.test.ts`（全部 buildXxxArgs/解析纯函数）、`src/main/app-label.test.ts`（自造 AXML/arsc fixture：字面量/引用、dense/sparse 偏移表、10 万+ 字符串池）、`src/main/paths.test.ts`。

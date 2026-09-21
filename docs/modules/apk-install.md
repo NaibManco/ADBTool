@@ -34,6 +34,7 @@ APK 安装：文件选择/拖入/手输路径三种入口，主进程校验，�
 - start 元素的 `attributeStart` 字段**相对 attrExt 结构（chunk+16）**，真实 aapt2 产物为 20（即属性区在 chunk+36）——自造 fixture 时曾因把 36 写进该字段掩盖过这个偏移 bug，已用两台真机厂商 APK 验证。
 - 字符串池支持 UTF-16 与 UTF-8（flags 0x100）两种编码；package 属性优先取 `rawValue` 字符串索引，缺省时回落 `typedValue`（dataType=0x03）。
 - 解析出的包名还要过 `PACKAGE_PATTERN` 才返回。
+- `readStringPool` 的 stringCount 上限 100 万（偏移与解码均有越界保护）：大型应用（Edge/MX 播放器）的 resources.arsc 全局池实测超 10 万条，早期 10 万上限导致应用名解析失败（应用名解析见 [ADB](adb-device.md) 的 app-label.ts；此函数为两者共用）。
 
 ## 测试
 

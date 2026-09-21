@@ -12,7 +12,8 @@ const device: AndroidDevice = {
 
 const app: ManagedApp = {
   packageName: "com.example.alpha",
-  apkPath: "/data/app/com.example.alpha/base.apk"
+  apkPath: "/data/app/com.example.alpha/base.apk",
+  label: "示例应用"
 };
 
 const details: ManagedAppDetails = {
@@ -38,7 +39,9 @@ describe("AppManager", () => {
 
     expect(html).toContain("应用管理");
     expect(html).toContain("Pixel One");
-    expect(html).toContain("搜索应用包名");
+    expect(html).toContain("搜索应用名称或包名");
+    // 列表与详情头部都显示应用名，包名作为副行/前缀保留
+    expect(html).toContain("示例应用");
     expect(html).toContain("com.example.alpha");
     expect(html).toContain("2.4.0");
     expect(html).toContain("清除数据");

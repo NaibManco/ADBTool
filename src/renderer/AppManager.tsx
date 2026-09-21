@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowClockwise,
   DeviceMobile,
@@ -24,6 +24,34 @@ function deviceName(device: AndroidDevice): string {
 
 function detailValue(value: string | number | undefined): string {
   return value === undefined || value === "" ? "—" : String(value);
+}
+
+// 应用名缓存：按 设备序列号 + 包名 存 localStorage，二次打开免等 arsc 传输。
+// 按需解析：只拉「搜索结果 + 选中项 + 可视区附近」的名称，滚动到哪拉到哪，
+// 不为看不到的条目花 arsc 传输。
+const LABEL_CACHE_KEY = "androidDevTool.appLabels.v1";
+const LABEL_BATCH_SIZE = 8;
+const LABEL_WINDOW_INITIAL = 24;
+
+function readLabelCache(serial: string): Record<string, string> {
+  try {
+    const raw = window.localStorage.getItem(LABEL_CACHE_KEY);
+    const all = raw ? (JSON.parse(raw) as Record<string, Record<string, string>>) : {};
+    return all[serial] ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLabelCache(serial: string, labels: Record<string, string>): void {
+  try {
+    const raw = window.localStorage.getItem(LABEL_CACHE_KEY);
+    const all = raw ? (JSON.parse(raw) as Record<string, Record<string, string>>) : {};
+    all[serial] = { ...all[serial], ...labels };
+    window.localStorage.setItem(LABEL_CACHE_KEY, JSON.stringify(all));
+  } catch {
+    // 缓存失败不影响功能
+  }
 }
 
 export function AppManager({
@@ -64,8 +92,15 @@ export function AppManager({
     void window.androidTool.listManagedApps(serial)
       .then((nextApps) => {
         if (!active) return;
-        setApps(nextApps);
-        setSelectedPackage(nextApps[0]?.packageName ?? "");
+        // 先用上次缓存的名称立即展示；未命中的交给按需解析（见 label 调度 effect）
+        requestedLabels.current = new Set();
+        setLabelWindow(LABEL_WINDOW_INITIAL);
+        const cached = readLabelCache(serial);
+        const withCache = nextApps.map((app) =>
+          cached[app.packageName] ? { ...app, label: cached[app.packageName] } : app
+        );
+        setApps(withCache);
+        setSelectedPackage(withCache[0]?.packageName ?? "");
       })
       .catch((loadError) => {
         if (active) {
@@ -115,9 +150,50 @@ export function AppManager({
   const visibleApps = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase();
     return apps.filter(
-      (app) => !keyword || app.packageName.toLocaleLowerCase().includes(keyword)
+      (app) =>
+        !keyword ||
+        app.packageName.toLocaleLowerCase().includes(keyword) ||
+        app.label?.toLocaleLowerCase().includes(keyword)
     );
   }, [apps, query]);
+
+  // 应用名按需解析调度：目标 = 当前列表前 labelWindow 个未解析条目（选中项优先）。
+  // 用「可见列表的包名签名」做依赖——名称 merge 不触发重跑，搜索/卸载/扩窗才触发。
+  const [labelWindow, setLabelWindow] = useState(LABEL_WINDOW_INITIAL);
+  const requestedLabels = useRef<Set<string>>(new Set());
+  const serialRef = useRef(serial);
+  serialRef.current = serial;
+  const pendingKey = visibleApps.map((app) => app.packageName).join("\n");
+  useEffect(() => {
+    if (!serial) return;
+    const pending = visibleApps.filter(
+      (app) => app.label === undefined && !requestedLabels.current.has(app.packageName)
+    );
+    const ordered = [
+      ...pending.filter((app) => app.packageName === selectedPackage),
+      ...pending.filter((app) => app.packageName !== selectedPackage)
+    ];
+    const targets = ordered.slice(0, labelWindow);
+    if (targets.length === 0) return;
+    for (const app of targets) requestedLabels.current.add(app.packageName);
+    void (async () => {
+      for (let i = 0; i < targets.length; i += LABEL_BATCH_SIZE) {
+        if (serialRef.current !== serial) return; // 设备已切换，丢弃本轮
+        const batch = targets.slice(i, i + LABEL_BATCH_SIZE);
+        try {
+          const labels = await window.androidTool.getManagedAppLabels(serial, batch);
+          if (serialRef.current !== serial) return;
+          writeLabelCache(serial, labels);
+          setApps((prev) => prev.map((app) =>
+            labels[app.packageName] ? { ...app, label: labels[app.packageName] } : app
+          ));
+        } catch {
+          // 应用名是增强信息，失败降级为包名
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- labelWindow/pendingKey 是显式依赖，selectedPackage 只影响排序优先级
+  }, [labelWindow, pendingKey, serial]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedApp = apps.find((app) => app.packageName === selectedPackage);
 
@@ -243,14 +319,26 @@ export function AppManager({
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="搜索应用包名"
+                  placeholder="搜索应用名称或包名"
                 />
               </label>
               <div className="app-manager-list-meta">
                 <span>{apps.length} 个第三方应用</span>
                 <span>仅用户安装</span>
               </div>
-              <div className="app-manager-app-list">
+              <div
+                className="app-manager-app-list"
+                onScroll={(event) => {
+                  // 接近底部时扩窗解析更多名称（只增不减，列表条目本身全部渲染）
+                  const el = event.currentTarget;
+                  if (
+                    labelWindow < apps.length &&
+                    el.scrollTop + el.clientHeight > el.scrollHeight - 300
+                  ) {
+                    setLabelWindow((window) => Math.min(window + LABEL_WINDOW_INITIAL, apps.length));
+                  }
+                }}
+              >
                 {loadingApps ? (
                   <div className="app-manager-empty"><span className="loader" /> 正在读取应用…</div>
                 ) : visibleApps.length === 0 ? (
@@ -268,7 +356,12 @@ export function AppManager({
                       }}
                     >
                       <span><Package size={16} /></span>
-                      <code>{app.packageName}</code>
+                      <span className="app-manager-app-name">
+                        <strong title={app.label ?? app.packageName}>
+                          {app.label ?? app.packageName}
+                        </strong>
+                        {app.label && <code>{app.packageName}</code>}
+                      </span>
                     </button>
                   ))
                 )}
@@ -286,8 +379,11 @@ export function AppManager({
                   <header className="app-detail-heading">
                     <span><Package size={28} weight="duotone" /></span>
                     <div>
-                      <h3>{selectedApp.packageName}</h3>
-                      <p>{details?.versionName ? `版本 ${details.versionName}` : "正在读取版本信息"}</p>
+                      <h3>{selectedApp.label ?? selectedApp.packageName}</h3>
+                      <p>
+                        {selectedApp.label ? `${selectedApp.packageName} · ` : ""}
+                        {details?.versionName ? `版本 ${details.versionName}` : "正在读取版本信息"}
+                      </p>
                     </div>
                     {loadingDetails && <ArrowClockwise className="spinning" size={17} />}
                   </header>

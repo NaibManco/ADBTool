@@ -140,13 +140,15 @@ function decodeString(
   }
 }
 
-function readStringPool(buffer: Buffer, start: number): string[] | undefined {
+export function readStringPool(buffer: Buffer, start: number): string[] | undefined {
   const headerSize = buffer.readUInt16LE(start + 2);
   const stringCount = buffer.readUInt32LE(start + 8);
   const flags = buffer.readUInt32LE(start + 16);
   const stringsStart = buffer.readUInt32LE(start + 20);
   const utf8 = (flags & 0x100) !== 0;
-  if (stringCount === 0 || stringCount > 100_000) return undefined;
+  // 上限防损坏文件声明超大数量；大型应用（Edge/MX 等）的 arsc 全局池
+  // 实测可达 10 万+ 字符串，取 100 万留足余量（偏移与解码均有越界保护）
+  if (stringCount === 0 || stringCount > 1_000_000) return undefined;
   const offsetsStart = start + headerSize;
   const strings: string[] = [];
   for (let i = 0; i < stringCount; i++) {

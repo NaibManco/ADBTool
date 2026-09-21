@@ -10,6 +10,7 @@ import type {
   ManagedApp,
   ManagedAppDetails
 } from "../shared/types";
+import { parseManifestAppLabel, resolveArscString } from "./app-label";
 
 const execFileAsync = promisify(execFile);
 
@@ -125,6 +126,25 @@ export function buildListInstalledPackagesArgs(serial: string): string[] {
 
 export function buildListManagedAppsArgs(serial: string): string[] {
   return ["-s", serial, "shell", "pm", "list", "packages", "-3", "-f"];
+}
+
+// 设备 APK 路径来自 pm list packages -f 输出（/data/app/~~x==/pkg-y==/base.apk 等），
+// 只含以下字符；白名单外的字符一律拒绝，避免拼进远端 shell 命令。
+const DEVICE_APK_PATH_PATTERN = /^\/[A-Za-z0-9._~/=-]+$/;
+
+/** 用设备端 unzip 把 APK 内条目原样写到 stdout（exec-out 二进制通道）。 */
+export function buildDeviceApkEntryArgs(
+  serial: string,
+  apkPath: string,
+  entryName: string
+): string[] {
+  if (!DEVICE_APK_PATH_PATTERN.test(apkPath)) {
+    throw new Error("设备 APK 路径无效");
+  }
+  if (entryName !== "AndroidManifest.xml" && entryName !== "resources.arsc") {
+    throw new Error("不支持的 APK 条目");
+  }
+  return ["-s", serial, "exec-out", "unzip", "-p", apkPath, entryName];
 }
 
 export function buildPackageDetailsArgs(
@@ -672,6 +692,65 @@ export class AdbClient {
       { windowsHide: true, timeout: 20_000 }
     );
     return parseManagedApps(stdout);
+  }
+
+  /** 读取设备 APK 内单个条目的原始字节。依赖设备端 unzip，缺失/失败由调用方降级。 */
+  async readDeviceApkEntry(
+    serial: string,
+    apkPath: string,
+    entryName: string
+  ): Promise<Buffer> {
+    const { stdout } = await execFileAsync(
+      this.executable,
+      buildDeviceApkEntryArgs(serial, apkPath, entryName),
+      // resources.arsc 可达数十 MB（Edge 33MB 实测），maxBuffer 给足；
+      // 批量并发时大文件在设备传输上排队，超时须比常规命令宽（60s）
+      { windowsHide: true, timeout: 60_000, encoding: "buffer", maxBuffer: 64 * 1024 * 1024 }
+    );
+    return stdout;
+  }
+
+  /**
+   * 批量解析应用显示名：逐应用抽 AndroidManifest.xml，label 为资源引用时
+   * 再抽 resources.arsc 解析（app-label.ts）。应用名是增强信息——单个应用
+   * 失败（无 unzip / 条目缺失 / 超限）只降级为不显示名称，不阻断列表。
+   * 并发 8：真机 65 应用实测约 10s，由渲染层后台填充。
+   */
+  async getManagedAppLabels(
+    serial: string,
+    apps: ManagedApp[]
+  ): Promise<Record<string, string>> {
+    const labels: Record<string, string> = {};
+    let next = 0;
+    const lane = async (): Promise<void> => {
+      while (next < apps.length) {
+        const app = apps[next++];
+        try {
+          const manifest = await this.readDeviceApkEntry(
+            serial,
+            app.apkPath,
+            "AndroidManifest.xml"
+          );
+          const { label, labelRes } = parseManifestAppLabel(manifest);
+          if (label !== undefined) {
+            labels[app.packageName] = label;
+            continue;
+          }
+          if (labelRes === undefined) continue;
+          const arsc = await this.readDeviceApkEntry(
+            serial,
+            app.apkPath,
+            "resources.arsc"
+          );
+          const resolved = resolveArscString(arsc, labelRes);
+          if (resolved !== undefined) labels[app.packageName] = resolved;
+        } catch {
+          // 该应用名称解析失败，保持包名展示
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(8, apps.length) }, lane));
+    return labels;
   }
 
   async getManagedAppDetails(

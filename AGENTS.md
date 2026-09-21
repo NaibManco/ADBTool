@@ -33,6 +33,7 @@ D:\MyTool
 │  ├─ main.ts                窗口、IPC、对话框和应用生命周期入口
 │  ├─ adb.ts                 ADB 命令构造与设备操作（含无线 pair/connect/tcpip）
 │  ├─ apk-manifest.ts        APK 包名离线识别（zip + 二进制 AXML 解析）
+│  ├─ app-label.ts           应用显示名离线解析（AXML label + resources.arsc 资源 ID → 字符串）
 │  ├─ embedded-mirror-manager.ts  投屏：@yume-chan(scrcpy 4.0) 视频流会话与控制注入（内嵌面板与独立窗口共用）
 │  ├─ terminal-manager.ts    多设备交互式 adb shell 会话
 │  ├─ decompile-manager.ts   APK 反编译（jadx）会话、文件树与安全读取
@@ -89,7 +90,7 @@ docs\modules\
 - Back、Home、最近任务、电源和重启等设备操作。
 - 应用进程过滤会展示包名/进程列表，由用户选择，不要擅自只取第一个前台进程。
 - APK 安装支持文件选择、拖入文件和输入本机 APK 绝对路径，三种入口共用主进程文件校验及同一安装链路。安装失败时解析 adb 输出并展示中文原因（保留原始错误）；检测到降级安装（`INSTALL_FAILED_VERSION_DOWNGRADE`）时提供"强制降级安装"选择，确认后带 `-d` 重试。可选「安装成功后启动应用」：离线解析 APK 包名（`apk-manifest.ts`，识别失败不自动启动并提示）。
-- 应用管理独立窗口：应用信息、启动应用（monkey 拉起入口 Activity，无需 Activity 名）、停止运行、清除数据和卸载。
+- 应用管理独立窗口：应用信息（列表主行显示应用名、副行包名，名称由主进程经设备端 unzip 抽 APK 解析 manifest/arsc，后台填充、失败降级为包名）、启动应用（monkey 拉起入口 Activity，无需 Activity 名）、停止运行、清除数据和卸载。
 - 文件管理独立窗口：目录浏览、缓存、上传、下载、新建目录、重命名、删除和图片预览。
 - 设备信息独立窗口：Android/SDK/安全补丁/构建版本、CPU、内存、存储、显示、电池和网络信息。
 - 截图后自动复制到剪贴板，并在主工作台右侧预览；支持另存为、再次复制、缩放和图片信息。

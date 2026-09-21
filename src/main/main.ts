@@ -1279,6 +1279,20 @@ function registerIpc(): void {
     return adb.listManagedApps(serial);
   });
 
+  // 应用显示名批量解析（unzip 抽 APK → 本地解析 manifest/arsc），失败项降级为包名
+  ipcMain.handle(
+    "apps:labels",
+    async (
+      _event,
+      serial: string,
+      apps: { packageName: string; apkPath: string }[]
+    ): Promise<Record<string, string>> => {
+      assertSerial(serial);
+      for (const app of apps) assertPackageName(app.packageName);
+      return adb.getManagedAppLabels(serial, apps);
+    }
+  );
+
   ipcMain.handle(
     "apps:details",
     async (_event, serial: string, packageName: string) => {

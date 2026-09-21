@@ -328,6 +328,8 @@ export interface DecompileSearchResult {
 export interface ManagedApp {
   packageName: string;
   apkPath: string;
+  /** 应用显示名（label），由主进程解析 APK 得到，失败保持 undefined 降级为包名。 */
+  label?: string;
 }
 
 export interface ManagedAppDetails {
@@ -386,6 +388,10 @@ export interface AndroidToolApi {
   listInstalledPackages(serial: string): Promise<string[]>;
   clearAppData(serial: string, packageName: string): Promise<ActionResult>;
   listManagedApps(serial: string): Promise<ManagedApp[]>;
+  getManagedAppLabels(
+    serial: string,
+    apps: { packageName: string; apkPath: string }[]
+  ): Promise<Record<string, string>>;
   getManagedAppDetails(serial: string, packageName: string): Promise<ManagedAppDetails>;
   uninstallApp(serial: string, packageName: string): Promise<ActionResult>;
   forceStopApp(serial: string, packageName: string): Promise<ActionResult>;

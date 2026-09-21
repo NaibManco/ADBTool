@@ -52,6 +52,8 @@ const api: AndroidToolApi = {
     ipcRenderer.invoke("device:clear-data", serial, packageName),
   listManagedApps: (serial: string) =>
     ipcRenderer.invoke("apps:list", serial),
+  getManagedAppLabels: (serial: string, apps: { packageName: string; apkPath: string }[]) =>
+    ipcRenderer.invoke("apps:labels", serial, apps),
   getManagedAppDetails: (serial: string, packageName: string) =>
     ipcRenderer.invoke("apps:details", serial, packageName),
   uninstallApp: (serial: string, packageName: string) =>

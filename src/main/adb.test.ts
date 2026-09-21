@@ -5,6 +5,7 @@ import {
   buildClearLogcatArgs,
   buildConnectArgs,
   buildDeviceActionArgs,
+  buildDeviceApkEntryArgs,
   buildDeviceIpv4Args,
   buildForceStopArgs,
   buildInstallArgs,
@@ -57,6 +58,39 @@ describe("application management", () => {
         apkPath: "/data/app/com.example.beta/base.apk"
       }
     ]);
+  });
+
+  it("builds exec-out unzip args for device APK entries", () => {
+    expect(
+      buildDeviceApkEntryArgs(
+        "serial-one",
+        "/data/app/~~0EwNuu4n04LjK62RrcZDw==/com.example-abc==/base.apk",
+        "AndroidManifest.xml"
+      )
+    ).toEqual([
+      "-s",
+      "serial-one",
+      "exec-out",
+      "unzip",
+      "-p",
+      "/data/app/~~0EwNuu4n04LjK62RrcZDw==/com.example-abc==/base.apk",
+      "AndroidManifest.xml"
+    ]);
+  });
+
+  it("rejects device APK paths with shell metacharacters or unexpected entries", () => {
+    expect(() =>
+      buildDeviceApkEntryArgs("serial-one", "/data/app/x;rm.apk", "AndroidManifest.xml")
+    ).toThrow("设备 APK 路径无效");
+    expect(() =>
+      buildDeviceApkEntryArgs("serial-one", "/data/app/a b/base.apk", "AndroidManifest.xml")
+    ).toThrow("设备 APK 路径无效");
+    expect(() =>
+      buildDeviceApkEntryArgs("serial-one", "data/app/base.apk", "AndroidManifest.xml")
+    ).toThrow("设备 APK 路径无效");
+    expect(() =>
+      buildDeviceApkEntryArgs("serial-one", "/data/app/base.apk", "classes.dex")
+    ).toThrow("不支持的 APK 条目");
   });
 
   it("parses package version, SDK, install, and permission details", () => {
