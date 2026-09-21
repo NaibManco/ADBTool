@@ -16,7 +16,7 @@ adb 可执行文件解析、设备发现轮询、按键/重启等设备控制命
 - 按键：`adb -s <s> shell input keyevent <code>`（back=4 home=3 recents=187 power=26）。
 - 音量：`shell cmd media_session volume --stream 3 --adj raise|lower`（注意：音量已从设备卡 UI 移除，DeviceAction 类型与命令仍保留）。
 - 重启：`adb -s <s> reboot`。
-- 启动应用：`shell monkey -p <pkg> -c android.intent.category.LAUNCHER 1`（免知道 Activity 名）。`AdbClient.launchApp` 归因输出：`No activities found to run` → 缺 LAUNCHER 入口；`monkey aborted` → 包不存在等（monkey 失败常以退出码 0 结束，成功也可能非零，stdout/stderr 合并判断）。
+- 启动应用：`shell monkey -p <pkg> -c android.intent.category.LAUNCHER --pct-syskeys 0 1`（免知道 Activity 名）。`--pct-syskeys 0` 不可省：无实体按键的设备上 monkey 在 syskeys 事件占比非 0 时直接 `System.exit(-5)`（adb 侧即退出码 251），一条事件都不注入、应用起不来。真机 Neo for arm64（Android 12）实测 —— 无该参数时 monkey 已正确解析出 `com.unity3d.player.UnityPlayerActivity` 仍以 251 退出、`topResumedActivity` 停在本桌面；加上后退出码 0、`Events injected: 1`、应用转为前台，同机 `xrengine`/`webapp` 也由 251 回归真实的 `No activities found to run`。带实体按键的手机（Android 16）加不加该参数均为 0，无回归。`AdbClient.launchApp` 归因输出：`No activities found to run` → 缺 LAUNCHER 入口；`monkey aborted` → 包不存在等（monkey 失败常以退出码 0 结束，成功也可能非零，stdout/stderr 合并判断）。
 - 无线配对/连接：`adb pair <ip:port> <code>` / `adb connect <ip:port>`；USB 一键转无线 = `adb -s <s> tcpip 5555` + `adb connect <ip>:5555`（handler 内 1.5s 后失败重试一次，adbd 切换需要时间）。
 - **连接失败网段诊断**（main.ts `withSubnetDiagnosis` + adb.ts `findLocalSubnetMatch`）：目标 IPv4 不落在任何本机网卡子网时，附加「设备 X 不在本机任何网段（本机 IPv4：…）」指引。真机案例：手机 wlan0 在 192.168.137.x、电脑只有 172.16.x/10.41.x，TCP 层不可达、重试必然超时——ColorOS 并不封 5555（adbd 照常 `tcp6 [::]:5555 LISTEN`），先查两边是否同网段再怀疑设备。
 - 设备 IP：`shell ip -o -4 addr show scope global`，`parseDeviceIpv4Addresses` **wlan 接口优先**排序（真机上 rmnet/vgate 等虚拟接口也会出现）。

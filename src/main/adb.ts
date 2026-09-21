@@ -152,7 +152,10 @@ export function buildLaunchAppArgs(
   serial: string,
   packageName: string
 ): string[] {
-  // monkey 免 root 启动：不需要知道入口 Activity 名即可拉起 launcher intent
+  // monkey 免 root 启动：不需要知道入口 Activity 名即可拉起 launcher intent。
+  // --pct-syskeys 0 不可省：无实体按键的设备（AR 眼镜）上，monkey 发现 syskeys
+  // 事件占比非 0 时会直接 System.exit(-5)（adb 侧表现为退出码 251），一条事件都不
+  // 注入、应用起不来；占比对「只拉起应用」没有意义，置 0 后设备端继续执行。
   return [
     "-s",
     serial,
@@ -162,6 +165,8 @@ export function buildLaunchAppArgs(
     packageName,
     "-c",
     "android.intent.category.LAUNCHER",
+    "--pct-syskeys",
+    "0",
     "1"
   ];
 }

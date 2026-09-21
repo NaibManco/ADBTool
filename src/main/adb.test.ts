@@ -375,6 +375,8 @@ describe("application process discovery", () => {
 });
 
 describe("application launch", () => {
+  // --pct-syskeys 0 必须有：无实体按键的设备（AR 眼镜）上 syskeys 事件占比非 0 时
+  // monkey 直接 System.exit(-5)（adb 侧退出码 251），一条事件都不注入、应用起不来。
   it("launches the launcher activity via monkey without knowing activity names", () => {
     expect(buildLaunchAppArgs("serial-one", "com.example.alpha")).toEqual([
       "-s",
@@ -385,6 +387,8 @@ describe("application launch", () => {
       "com.example.alpha",
       "-c",
       "android.intent.category.LAUNCHER",
+      "--pct-syskeys",
+      "0",
       "1"
     ]);
   });
