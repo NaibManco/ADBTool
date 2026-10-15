@@ -254,6 +254,16 @@ export function parseDeviceIpv4Addresses(output: string): string[] {
     .filter((address) => address !== "127.0.0.1");
 }
 
+/**
+ * 从 `wm size` 输出推断横屏对应的 user_rotation 值：物理分辨率（自然方向）
+ * 横向 → 0，纵向 → 1。解析失败按自然横屏回退（本工具主场景是 AR 眼镜）。
+ */
+export function parseLandscapeRotation(wmSizeOutput: string): 0 | 1 {
+  const match = /Physical size:\s*(\d+)x(\d+)/.exec(wmSizeOutput);
+  if (!match) return 0;
+  return Number(match[1]) >= Number(match[2]) ? 0 : 1;
+}
+
 export function buildClearLogcatArgs(
   serial: string,
   buffer: LogcatBuffer

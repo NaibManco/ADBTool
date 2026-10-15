@@ -18,6 +18,7 @@ import {
   parseAdbDevices,
   parseConnectResult,
   parseDeviceIpv4Addresses,
+  parseLandscapeRotation,
   parseInstallFailure,
   parseManagedApps,
   parsePackageDetails,
@@ -278,6 +279,24 @@ describe("parseInstallFailure", () => {
     expect(parseInstallFailure("Success")).toBeUndefined();
     expect(parseInstallFailure("Performing streamed install\nSuccess")).toBeUndefined();
     expect(parseInstallFailure("")).toBeUndefined();
+  });
+});
+
+describe("parseLandscapeRotation", () => {
+  it("maps physical resolution to the landscape user_rotation value", () => {
+    // 自然横屏（眼镜/TV 类）：rotation 0 即横屏
+    expect(parseLandscapeRotation("Physical size: 1920x1080\r\n")).toBe(0);
+    // 自然竖屏（手机类）：rotation 1（90°）才是横屏
+    expect(parseLandscapeRotation("Physical size: 1080x2340\r\n")).toBe(1);
+    // 只认 Physical（Override 不代表自然方向）
+    expect(
+      parseLandscapeRotation("Physical size: 1080x2340\r\nOverride size: 1920x1080\r\n")
+    ).toBe(1);
+  });
+
+  it("falls back to natural landscape when wm size cannot be parsed", () => {
+    expect(parseLandscapeRotation("")).toBe(0);
+    expect(parseLandscapeRotation("error: no devices found")).toBe(0);
   });
 });
 

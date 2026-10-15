@@ -9,11 +9,14 @@ import {
 interface AppSettings {
   theme: ThemeMode;
   mirrorQuality: MirrorQualityPreset;
+  /** 投屏期间锁定横屏的设备序列号（眼镜锁横屏，手机跟随旋转，各自记忆）。 */
+  mirrorLandscapeLock: string[];
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark",
-  mirrorQuality: "balanced"
+  mirrorQuality: "balanced",
+  mirrorLandscapeLock: []
 };
 
 export function normalizeTheme(value: unknown): ThemeMode {
@@ -25,10 +28,18 @@ export function parseSettings(content: string): AppSettings {
     const parsed = JSON.parse(content) as {
       theme?: unknown;
       mirrorQuality?: unknown;
+      mirrorLandscapeLock?: unknown;
     };
     return {
       theme: normalizeTheme(parsed.theme),
-      mirrorQuality: normalizeMirrorQualityPreset(parsed.mirrorQuality)
+      mirrorQuality: normalizeMirrorQualityPreset(parsed.mirrorQuality),
+      mirrorLandscapeLock: Array.isArray(parsed.mirrorLandscapeLock)
+        ? [...new Set(
+            parsed.mirrorLandscapeLock.filter(
+              (item): item is string => typeof item === "string" && !!item
+            )
+          )]
+        : []
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -58,6 +69,20 @@ export class SettingsStore {
     this.update({
       mirrorQuality: normalizeMirrorQualityPreset(preset)
     });
+  }
+
+  isMirrorLandscapeLocked(serial: string): boolean {
+    return this.settings.mirrorLandscapeLock.includes(serial);
+  }
+
+  setMirrorLandscapeLock(serial: string, locked: boolean): void {
+    const current = new Set(this.settings.mirrorLandscapeLock);
+    if (locked) {
+      current.add(serial);
+    } else {
+      current.delete(serial);
+    }
+    this.update({ mirrorLandscapeLock: [...current] });
   }
 
   private update(patch: Partial<AppSettings>): void {

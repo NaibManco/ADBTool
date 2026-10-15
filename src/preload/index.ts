@@ -123,6 +123,10 @@ const api: AndroidToolApi = {
     ipcRenderer.invoke("mirror:quality-get"),
   setMirrorQuality: (preset: MirrorQualityPreset) =>
     ipcRenderer.invoke("mirror:quality-set", preset),
+  getMirrorLandscapeLock: (serial: string) =>
+    ipcRenderer.invoke("mirror:landscape-lock-get", serial),
+  setMirrorLandscapeLock: (serial: string, enabled: boolean) =>
+    ipcRenderer.invoke("mirror:landscape-lock-set", serial, enabled),
   setMirrorWindowAlwaysOnTop: (serial: string, alwaysOnTop: boolean) =>
     ipcRenderer.invoke("mirror:always-on-top", serial, alwaysOnTop),
   setMirrorScreenPower: (serial: string, on: boolean) =>

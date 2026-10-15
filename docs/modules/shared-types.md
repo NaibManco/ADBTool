@@ -18,7 +18,7 @@
 | 应用 | listInstalledPackages/clearAppData/listManagedApps/getManagedAppLabels/getManagedAppDetails/uninstallApp/forceStopApp/launchApp |
 | 无线调试 | pairWireless/connectWireless/connectWirelessViaUsb |
 | 采集 | captureScreenshot/copyCaptureMedia/saveCaptureMediaAs/startScreenRecording/stopScreenRecording/listScreenRecordings |
-| 投屏 | startMirror/stopMirror（外部窗口）/startEmbeddedMirror/stopEmbeddedMirror/sendMirrorControl/onMirrorEvent |
+| 投屏 | startMirror/stopMirror（外部窗口）/startEmbeddedMirror/stopEmbeddedMirror/sendMirrorControl/onMirrorEvent/getMirrorQuality/setMirrorQuality/getMirrorLandscapeLock/setMirrorLandscapeLock |
 | 日志 | startLogcat/stopLogcat/setLogcatProcess/setLogcatBuffer/clearLogcatBuffer/exportLogcatText/copyLogcatText/listAppProcesses/onLogcatEvent/onLogcatDeviceAdd |
 | 终端 | startTerminal/stopTerminal/sendTerminalInput/onTerminalEvent |
 | 反编译 | startDecompile/cancelDecompile/discardDecompile/getDecompileTree/readDecompileFile/onDecompileEvent |

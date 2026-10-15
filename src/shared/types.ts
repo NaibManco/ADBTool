@@ -425,6 +425,8 @@ export interface AndroidToolApi {
   sendMirrorControl(serial: string, input: MirrorControlInput): void;
   getMirrorQuality(): Promise<MirrorQualityPreset>;
   setMirrorQuality(preset: MirrorQualityPreset): Promise<ActionResult>;
+  getMirrorLandscapeLock(serial: string): Promise<boolean>;
+  setMirrorLandscapeLock(serial: string, enabled: boolean): Promise<ActionResult>;
   setMirrorWindowAlwaysOnTop(serial: string, alwaysOnTop: boolean): Promise<ActionResult>;
   setMirrorScreenPower(serial: string, on: boolean): Promise<ActionResult>;
   startTerminal(serial: string): Promise<ActionResult>;

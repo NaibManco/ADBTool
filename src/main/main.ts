@@ -119,7 +119,9 @@ const embeddedMirror = new EmbeddedMirrorManager(
     }
   },
   // 画质档位从持久化设置读取，start() 每次连接按当前档位编码
-  () => settings.getMirrorQuality()
+  () => settings.getMirrorQuality(),
+  // 按设备的"锁定横屏"开关：start() 出画前锁设备旋转，停止时恢复
+  (serial: string) => settings.isMirrorLandscapeLocked(serial)
 );
 const terminal = new TerminalManager(resolveAdbPath(), (event) => {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -1044,6 +1046,39 @@ function registerIpc(): void {
         return {
           ok: true,
           message: `画质已切换为 ${mirrorQualityLabel(next)}，投屏已按新档位重连`
+        };
+      } catch (error) {
+        return resultFromError(error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "mirror:landscape-lock-get",
+    (_event, serial: string): boolean => {
+      assertSerial(serial);
+      return settings.isMirrorLandscapeLocked(serial);
+    }
+  );
+
+  ipcMain.handle(
+    "mirror:landscape-lock-set",
+    async (
+      _event,
+      serial: string,
+      enabled: unknown
+    ): Promise<ActionResult> => {
+      try {
+        assertSerial(serial);
+        const next = enabled === true;
+        settings.setMirrorLandscapeLock(serial, next);
+        // 在投/重连中即时生效，无需重连（settings 即时改变显示方向）
+        await embeddedMirror.setLandscapeLock(serial, next);
+        return {
+          ok: true,
+          message: next
+            ? "已锁定横屏（投屏期间）"
+            : "已恢复跟随设备旋转"
         };
       } catch (error) {
         return resultFromError(error);

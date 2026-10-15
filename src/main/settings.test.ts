@@ -12,28 +12,56 @@ describe("settings", () => {
   it("recovers safely from missing or malformed settings", () => {
     expect(parseSettings('{"theme":"light"}')).toEqual({
       theme: "light",
-      mirrorQuality: "balanced"
+      mirrorQuality: "balanced",
+      mirrorLandscapeLock: []
     });
     expect(parseSettings('{"theme":"unknown"}')).toEqual({
       theme: "dark",
-      mirrorQuality: "balanced"
+      mirrorQuality: "balanced",
+      mirrorLandscapeLock: []
     });
     expect(parseSettings("not-json")).toEqual({
       theme: "dark",
-      mirrorQuality: "balanced"
+      mirrorQuality: "balanced",
+      mirrorLandscapeLock: []
     });
   });
 
   it("persists mirror quality presets with safe fallback", () => {
     expect(parseSettings('{"theme":"dark","mirrorQuality":"high"}')).toEqual({
       theme: "dark",
-      mirrorQuality: "high"
+      mirrorQuality: "high",
+      mirrorLandscapeLock: []
     });
     expect(
       parseSettings('{"theme":"dark","mirrorQuality":"ultra"}')
     ).toEqual({
       theme: "dark",
-      mirrorQuality: "balanced"
+      mirrorQuality: "balanced",
+      mirrorLandscapeLock: []
+    });
+  });
+
+  it("keeps the landscape lock as a deduplicated serial allowlist", () => {
+    expect(
+      parseSettings('{"mirrorLandscapeLock":["glasses","phone","glasses"]}')
+    ).toEqual({
+      theme: "dark",
+      mirrorQuality: "balanced",
+      mirrorLandscapeLock: ["glasses", "phone"]
+    });
+    // 非字符串与空串条目丢弃，非数组整体回退为空
+    expect(
+      parseSettings('{"mirrorLandscapeLock":["glasses",1,null,""]}')
+    ).toEqual({
+      theme: "dark",
+      mirrorQuality: "balanced",
+      mirrorLandscapeLock: ["glasses"]
+    });
+    expect(parseSettings('{"mirrorLandscapeLock":"glasses"}')).toEqual({
+      theme: "dark",
+      mirrorQuality: "balanced",
+      mirrorLandscapeLock: []
     });
   });
 });

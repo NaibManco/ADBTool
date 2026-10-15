@@ -2,6 +2,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import type { WebContents } from "electron";
+import { parseLandscapeRotation } from "./adb";
 import {
   MIRROR_QUALITY_PRESETS,
   type MirrorControlInput,
@@ -74,6 +75,11 @@ export class EmbeddedMirrorManager {
   private readonly pendingStops = new Map<string, NodeJS.Timeout>();
   // 画质切换的挂起重连：等待设备编码器释放后自动重启会话
   private readonly pendingRestarts = new Map<string, NodeJS.Timeout>();
+  // 横屏锁定期间记录的设备原旋转设置，停止投屏时恢复
+  private readonly rotationSaved = new Map<string, {
+    auto: boolean;
+    user: string | null;
+  }>();
   private serverClient?: InstanceType<typeof AdbServerNodeJsClient>;
   private serverBytes?: Promise<Uint8Array>;
 
@@ -84,7 +90,9 @@ export class EmbeddedMirrorManager {
       event: MirrorManagerEvent,
       target?: WebContents
     ) => void,
-    private readonly getQuality: () => MirrorQualityPreset = () => "balanced"
+    private readonly getQuality: () => MirrorQualityPreset = () => "balanced",
+    private readonly getLandscapeLock: (serial: string) => boolean =
+      () => false
   ) {}
 
   isRunning(serial: string): boolean {
@@ -156,6 +164,94 @@ export class EmbeddedMirrorManager {
       return undefined;
     }
     return { width: session.width, height: session.height };
+  }
+
+  /**
+   * 某设备的锁定横屏开关变更：在投/重连中即时生效；
+   * 未在投时只改设置，由下次 start() 应用。
+   */
+  async setLandscapeLock(serial: string, enabled: boolean): Promise<void> {
+    const active =
+      this.sessions.has(serial) ||
+      this.pendingRestarts.has(serial) ||
+      this.starting.has(serial);
+    if (!active) return;
+    if (enabled) {
+      await this.applyLandscapeLock(serial);
+    } else {
+      await this.restoreRotation(serial);
+    }
+  }
+
+  /**
+   * 投屏期间锁定设备横屏（眼镜头动时加速度计触发系统旋转，画面横竖跳）：
+   * 关闭自动旋转并把 user_rotation 钉到按物理分辨率推断的横屏值。
+   * 原值记录在案，停止投屏/关闭开关时恢复。写入后回读校验，失败抛错
+   * ——start 路径不阻断投屏，手动开关路径把错误报给用户。
+   */
+  private async applyLandscapeLock(serial: string): Promise<void> {
+    // 已在锁定期（画质重连、多观众接入）：不覆盖最初记录的原值
+    if (this.rotationSaved.has(serial)) return;
+    const auto = (await this.deviceShell(serial, [
+      "settings", "get", "system", "accelerometer_rotation"
+    ])).trim() === "0";
+    // 原本就是手动旋转的设备，恢复时还要还原其手动角度
+    const user = auto
+      ? (await this.deviceShell(serial, [
+          "settings", "get", "system", "user_rotation"
+        ])).trim()
+      : null;
+    const rotation = parseLandscapeRotation(
+      await this.deviceShell(serial, ["wm", "size"])
+    );
+    // 先写 user_rotation 再关自动旋转：user_rotation 仅在自动旋转关闭时
+    // 生效，该顺序下屏幕只跳一次（直接到目标横屏）
+    await this.deviceShell(serial, [
+      "settings", "put", "system", "user_rotation", String(rotation)
+    ]);
+    await this.deviceShell(serial, [
+      "settings", "put", "system", "accelerometer_rotation", "0"
+    ]);
+    // 回读校验：写入未生效（无 shell 权限、厂商 ROM 拒写）时让调用方知道
+    const autoNow = (await this.deviceShell(serial, [
+      "settings", "get", "system", "accelerometer_rotation"
+    ])).trim();
+    if (autoNow !== "0") {
+      throw new Error(`设备拒绝旋转锁定（accelerometer_rotation=${autoNow}）`);
+    }
+    this.rotationSaved.set(serial, {
+      auto,
+      user: user && /^\d$/.test(user) ? user : null
+    });
+  }
+
+  /** 恢复 applyLandscapeLock 记录的设备原旋转设置。 */
+  private async restoreRotation(serial: string): Promise<void> {
+    const saved = this.rotationSaved.get(serial);
+    if (!saved) return;
+    this.rotationSaved.delete(serial);
+    try {
+      if (saved.user !== null) {
+        await this.deviceShell(serial, [
+          "settings", "put", "system", "user_rotation", saved.user
+        ]);
+      }
+      await this.deviceShell(serial, [
+        "settings", "put", "system", "accelerometer_rotation",
+        saved.auto ? "0" : "1"
+      ]);
+    } catch {
+      // 设备可能已断开
+    }
+  }
+
+  private async deviceShell(serial: string, args: string[]): Promise<string> {
+    const { stdout } = await execFileAsync(
+      this.adbExecutable,
+      ["-s", serial, "shell", ...args],
+      { windowsHide: true, timeout: 10_000 }
+    );
+    return stdout;
   }
 
   async start(serial: string, target?: WebContents): Promise<void> {
@@ -232,6 +328,12 @@ export class EmbeddedMirrorManager {
         windowsHide: true,
         timeout: 15_000
       }).catch(() => undefined);
+
+      // 该设备开了"锁定横屏"：出画前先锁住，首帧即目标方向。
+      // 失败不阻断投屏（投屏中再点开关可看到具体错误）
+      if (this.getLandscapeLock(serial)) {
+        await this.applyLandscapeLock(serial).catch(() => undefined);
+      }
 
       this.serverClient ??= new AdbServerNodeJsClient();
       const adb = await this.serverClient.createAdb({ serial });
@@ -471,6 +573,9 @@ export class EmbeddedMirrorManager {
       this.pendingRestarts.delete(serial);
     }
     await session.client.close().catch(() => undefined);
+    // 会话真正结束：恢复设备原旋转设置。
+    // 画质重连（restartForQuality）不走这里——锁保持，重连后 start 再核对
+    await this.restoreRotation(serial);
     this.onEvent({
       type: "status",
       serial,

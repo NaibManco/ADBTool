@@ -4,7 +4,12 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent
 } from "react";
-import { ArrowSquareOut, Monitor, ShieldWarning } from "@phosphor-icons/react";
+import {
+  ArrowSquareOut,
+  DeviceRotate,
+  Monitor,
+  ShieldWarning
+} from "@phosphor-icons/react";
 import { WebCodecsVideoDecoder } from "@yume-chan/scrcpy-decoder-webcodecs";
 import type { ScrcpyVideoCodecId } from "@yume-chan/scrcpy";
 import type { AndroidDevice } from "../shared/types";
@@ -52,6 +57,8 @@ export function MirrorPane({
   const [running, setRunning] = useState(false);
   const [decoder, setDecoder] = useState<MirrorDecoder | null>(null);
   const [screenOff, setScreenOff] = useState(false);
+  // 按设备记忆的"锁定横屏"（眼镜锁住，手机跟随旋转）
+  const [landscapeLock, setLandscapeLock] = useState(false);
   const externalWindow =
     device.mirroring && !device.mirroringEmbedded;
   const hostRef = useRef<HTMLDivElement>(null);
@@ -75,6 +82,28 @@ export function MirrorPane({
       setStatus(result.message || "息屏控制失败");
     }
   }
+
+  // 锁定横屏开关：投屏期间固定横屏，按设备记忆
+  async function toggleLandscapeLock(): Promise<void> {
+    const next = !landscapeLock;
+    const result = await window.androidTool.setMirrorLandscapeLock(
+      device.serial,
+      next
+    );
+    if (result.ok) {
+      setLandscapeLock(next);
+      setStatus(next ? "已锁定横屏" : "已恢复跟随设备旋转");
+    } else {
+      setStatus(result.message || "锁定横屏设置失败");
+    }
+  }
+
+  // 挂载时读取该设备的"锁定横屏"记忆
+  useEffect(() => {
+    void window.androidTool
+      .getMirrorLandscapeLock(device.serial)
+      .then(setLandscapeLock);
+  }, [device.serial]);
 
   useEffect(() => {
     if (!WebCodecsVideoDecoder.isSupported) {
@@ -263,6 +292,17 @@ export function MirrorPane({
           title={screenOff ? "点亮设备屏幕" : "设备息屏（画面继续投屏）"}
         >
           {screenOff ? <ShieldWarning size={14} /> : <Monitor size={14} />}
+        </button>
+        <button
+          className={landscapeLock ? "mirror-tool on" : "mirror-tool"}
+          onClick={() => void toggleLandscapeLock()}
+          title={
+            landscapeLock
+              ? "已锁定横屏，点击恢复跟随设备旋转"
+              : "投屏期间锁定横屏（不随设备旋转）"
+          }
+        >
+          <DeviceRotate size={14} />
         </button>
         <button
           className={externalWindow ? "mirror-popout on" : "mirror-popout"}
