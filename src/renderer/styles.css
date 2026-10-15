@@ -6241,6 +6241,12 @@ footer b {
   margin: 0;
 }
 
+/* body 的全局 min-width:320px 是主界面布局约束；本窗口 minWidth 240，
+   视口窄于 320 时页面被撑出横向滚动条（再连带顶出纵向），这里解除 */
+body:has(main.mirror-window) {
+  min-width: 0;
+}
+
 .mirror-window-host {
   display: flex;
   flex: 1;
