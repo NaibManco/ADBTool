@@ -1781,14 +1781,62 @@ function registerIpc(): void {
   );
 }
 
-async function createWindow(): Promise<void> {
-  mainWindow = new BrowserWindow({
+// 启动过渡窗：内联 HTML 零文件 IO，进程一起来就能显示。
+// 注意 portable 的解压发生在壳里（本进程出生之前），"解压中"无法从这里
+// 反馈；这里覆盖的是解压完成后、主界面首帧前这段冷加载等待。
+const SPLASH_HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:100%;background:#0b0f14;color:#edf4f7;
+font:13px/1 "Segoe UI","Microsoft YaHei UI",system-ui,sans-serif;
+display:grid;place-items:center;user-select:none;cursor:default;overflow:hidden}
+.box{display:flex;flex-direction:column;align-items:center;gap:14px}
+.logo{color:#18d0ab;font-size:20px;font-weight:600}
+.hint{color:#586a73}
+.dots{display:flex;gap:6px}
+.dots i{width:7px;height:7px;border-radius:50%;background:#18d0ab;
+animation:pulse 1.2s infinite ease-in-out}
+.dots i:nth-child(2){animation-delay:.2s}
+.dots i:nth-child(3){animation-delay:.4s}
+@keyframes pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}
+40%{opacity:1;transform:scale(1)}}
+</style></head><body><div class="box">
+<div class="logo">Android Dev Tool</div>
+<div class="dots"><i></i><i></i><i></i></div>
+<div class="hint">正在启动…</div>
+</div></body></html>`;
+
+function createSplash(): BrowserWindow {
+  const splash = new BrowserWindow({
+    width: 320,
+    height: 150,
+    center: true,
+    frame: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    backgroundColor: "#0b0f14",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  void splash
+    .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(SPLASH_HTML)}`)
+    .catch(() => undefined);
+  return splash;
+}
+
+async function createWindow(splash?: BrowserWindow): Promise<void> {
+  const window = new BrowserWindow({
     width: 1180,
     height: 760,
     minWidth: 850,
     minHeight: 560,
     backgroundColor: "#0b0f14",
     title: "Android Dev Tool",
+    // 首帧画完再显示：冷启动页面加载慢，先显窗只会黑屏干等，
+    // 等待期由 splash 过渡窗负责反馈
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -1796,11 +1844,20 @@ async function createWindow(): Promise<void> {
     }
   });
 
-  mainWindow.removeMenu();
-  mainWindow.on("closed", () => {
-    mainWindow = undefined;
+  window.removeMenu();
+  window.once("ready-to-show", () => {
+    window.show();
+    if (splash && !splash.isDestroyed()) {
+      splash.close();
+    }
   });
-  await loadRenderer(mainWindow);
+  window.on("closed", () => {
+    if (mainWindow === window) {
+      mainWindow = undefined;
+    }
+  });
+  mainWindow = window;
+  await loadRenderer(window);
 }
 
 app.whenReady().then(async () => {
@@ -1814,7 +1871,17 @@ app.whenReady().then(async () => {
   registerCaptureMediaProtocol();
   nativeTheme.themeSource = settings.getTheme();
   registerIpc();
-  await createWindow();
+  const splash = createSplash();
+  // 兜底：页面加载异常时 ready-to-show 不来，过渡窗不能变"永动机"
+  setTimeout(() => {
+    if (!splash.isDestroyed()) {
+      splash.close();
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+    }
+  }, 10_000);
+  await createWindow(splash);
 
   app.on("activate", async () => {
     if (!mainWindow || mainWindow.isDestroyed()) {
